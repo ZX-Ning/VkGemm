@@ -23,7 +23,6 @@ protected:
     VmaAllocation allocation;
     const VmaAllocator& allocator;
     VmaAllocationInfo resultInfo;
-    vk::DeviceSize size;
     LoadedBuffer(
         const vk::BufferCreateInfo& info,
         const VmaAllocationCreateInfo& allocInfo,
@@ -49,11 +48,13 @@ public:
     );
 
     void update(std::span<const uint8_t> data);
+    uint8_t* getMappedPtr();
 };
 
 struct StaticBuffer : public LoadedBuffer {
 private:
     std::unique_ptr<DynamicBuffer> staging;
+    // size_t size;
 
 public:
     StaticBuffer(
@@ -63,6 +64,7 @@ public:
     );
     static void copyBuffer(vk::Buffer src, vk::Buffer dst, vk::raii::CommandBuffer& cmd, vk::DeviceSize size);
     void load(std::span<const uint8_t> data, vk::raii::CommandBuffer& cmd);
+    std::span<uint8_t> readBack(vk::raii::CommandBuffer& cmd);
     void deleteStaging();
 };
 
@@ -70,7 +72,8 @@ struct BufferFactory {
     enum class Type {
         Vertex,
         Index,
-        Uniform
+        Uniform,
+        Storage
     };
     static std::shared_ptr<StaticBuffer> createStaticBuffer(Type type, const VmaAllocator& allocator, size_t size);
     static std::shared_ptr<DynamicBuffer> createDynamicBuffer(Type type, const VmaAllocator& allocator, size_t size);

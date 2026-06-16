@@ -1,7 +1,7 @@
 #include "VulkanContext.hpp"
 
-#include <SDL3/SDL_error.h>
-#include <SDL3/SDL_vulkan.h>
+// #include <SDL3/SDL_error.h>
+// #include <SDL3/SDL_vulkan.h>
 #include <vk_mem_alloc.h>
 
 #include <cassert>
@@ -13,7 +13,6 @@
 #include <vulkan/vulkan_raii.hpp>
 #include <vulkan/vulkan_structs.hpp>
 
-#include "../WindowApp.hpp"
 #include "../utils.hpp"
 
 namespace {
@@ -23,7 +22,7 @@ const std::vector<char const*> validationLayers = {
     "VK_LAYER_KHRONOS_validation"
 };
 const std::vector<const char*> requiredDeviceExtension = {
-    vk::KHRSwapchainExtensionName,
+    // vk::KHRSwapchainExtensionName,
     vk::KHRSpirv14ExtensionName,
     vk::KHRSynchronization2ExtensionName,
     vk::KHRCreateRenderpass2ExtensionName,
@@ -32,16 +31,16 @@ const std::vector<const char*> requiredDeviceExtension = {
 };
 
 std::vector<const char*> getRequiredExtensions() {
-    Uint32 sdlExtensionCount = 0;
-    const char* const* sdlExtensions =
-        SDL_Vulkan_GetInstanceExtensions(&sdlExtensionCount);
-    if (!sdlExtensions) {
-        throw std::runtime_error(
-            std::format("failed to get SDL Vulkan instance extensions: {}", SDL_GetError())
-        );
-    }
+    // Uint32 sdlExtensionCount = 0;
+    // const char* const* sdlExtensions =
+    //     SDL_Vulkan_GetInstanceExtensions(&sdlExtensionCount);
+    // if (!sdlExtensions) {
+    //     throw std::runtime_error(
+    //         std::format("failed to get SDL Vulkan instance extensions: {}", SDL_GetError())
+    //     );
+    // }
 
-    std::vector extensions(sdlExtensions, sdlExtensions + sdlExtensionCount);
+    std::vector<const char*> extensions;
     if (ENABLE_VALIDATION_LAYERS) {
         extensions.push_back(vk::EXTDebugUtilsExtensionName);
     }
@@ -260,12 +259,12 @@ vk::raii::DescriptorPool createDescriptorPool(
 
 }  // namespace
 
-VulkanContext::VulkanContext(WindowApp& windowApp) {
+VulkanContext::VulkanContext() {
     std::println("Starting Vulkan instance.");
 
     this->instance = createInstance(context);
     this->debugMessenger = setupDebugMessenger(instance);
-    this->surface = windowApp.createSurface(instance);
+    // this->surface = windowApp.createSurface(instance);
     this->physicalDevice = pickPhysicalDevice(instance);
     initLogicalDevice();
     initVmaAllocator();
@@ -282,9 +281,6 @@ VulkanContext::VulkanContext(WindowApp& windowApp) {
     };
     this->loadingCmdBuffer =
         std::move(device.allocateCommandBuffers(allocInfo)[0]);
-    this->surfaceFormat = chooseSwapSurfaceFormat(
-        physicalDevice.getSurfaceFormatsKHR(surface)
-    );
     this->descriptorPool = createDescriptorPool(device);
 }
 
@@ -300,8 +296,8 @@ void VulkanContext::initLogicalDevice() {
     // graphics and present
     uint32_t queueIndex = ~0;
     for (uint32_t qfpIndex = 0; qfpIndex < queueFamilyProperties.size(); qfpIndex++) {
-        if ((queueFamilyProperties[qfpIndex].queueFlags & vk::QueueFlagBits::eGraphics) &&
-            physicalDevice.getSurfaceSupportKHR(qfpIndex, *surface)) {
+        if ((queueFamilyProperties[qfpIndex].queueFlags &
+             (vk::QueueFlagBits::eGraphics | vk::QueueFlagBits::eCompute))) {
             // found a queue family that supports both graphics and present
             queueIndex = qfpIndex;
             break;

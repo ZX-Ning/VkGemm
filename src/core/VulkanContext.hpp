@@ -16,7 +16,7 @@ struct VulkanContext {
     vk::raii::DebugUtilsMessengerEXT debugMessenger{nullptr};
     vk::raii::PhysicalDevice physicalDevice{nullptr};
     vk::raii::Device device{nullptr};
-    vk::raii::SurfaceKHR surface{nullptr};
+    // vk::raii::SurfaceKHR surface{nullptr};
     vk::raii::Queue queue{nullptr};
     vk::raii::CommandPool commandPool{nullptr};
     uint32_t queueFamilyIndex = ~0;
@@ -24,10 +24,10 @@ struct VulkanContext {
     vk::raii::DescriptorPool descriptorPool{nullptr};
 
     VmaAllocatorWrapper allocator;
-    vk::SurfaceFormatKHR surfaceFormat;
+    // vk::SurfaceFormatKHR surfaceFormat;
     void initLogicalDevice();
     void initVmaAllocator();
-    explicit VulkanContext(WindowApp&);
+    explicit VulkanContext();
     ~VulkanContext();
 
     DISABLE_COPY(VulkanContext)

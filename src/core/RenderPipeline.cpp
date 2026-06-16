@@ -120,3 +120,22 @@ std::shared_ptr<Pipeline> createGraphicsPipeline(
         pipelineCreateInfoChain.get<vk::GraphicsPipelineCreateInfo>()
     });
 }
+
+std::shared_ptr<Pipeline> createComputePipeline(
+    const VulkanContext& context,
+    const ComputePipelineDesc& desc
+) {
+    vk::raii::ShaderModule shaderModule =
+        createShaderModule(context.device, desc.shaderSpv);
+    vk::ComputePipelineCreateInfo compPipeInfo = {
+        .stage = vk::PipelineShaderStageCreateInfo{
+            .stage = vk::ShaderStageFlagBits::eCompute,
+            .module = shaderModule,
+            .pName = "main"
+        },
+        .layout = desc.layout
+    };
+    return std::make_unique<Pipeline>(
+        context.device.createComputePipeline(nullptr, compPipeInfo)
+    );
+}

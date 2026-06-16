@@ -7,7 +7,6 @@ LoadedBuffer::LoadedBuffer(
     const VmaAllocator& allocator
 ) : allocator(allocator) {
     VkBuffer buffer;
-    this->size = info.size;
     VkResult result = vmaCreateBuffer(
         allocator,
         &*info,
@@ -41,7 +40,11 @@ DynamicBuffer::DynamicBuffer(
 ) : LoadedBuffer(info, allocInfo, allocator) {}
 
 void DynamicBuffer::update(std::span<const uint8_t> data) {
-    memcpy(resultInfo.pMappedData, data.data(), data.size_bytes());
+    std::memcpy(resultInfo.pMappedData, data.data(), data.size_bytes());
+}
+
+uint8_t* DynamicBuffer::getMappedPtr() {
+    return (uint8_t*)this->resultInfo.pMappedData;
 }
 
 StaticBuffer::StaticBuffer(
@@ -61,10 +64,17 @@ void StaticBuffer::copyBuffer(vk::Buffer src, vk::Buffer dst, vk::raii::CommandB
 void StaticBuffer::load(
     std::span<const uint8_t> data, vk::raii::CommandBuffer& cmd
 ) {
-    size_t size = data.size_bytes();
+    int size = resultInfo.size;
     staging = BufferFactory::createStagingBuffer(allocator, size);
     staging->update(data);
     copyBuffer(staging->getVkBuffer(), this->buffer, cmd, size);
+}
+
+std::span<uint8_t> StaticBuffer::readBack(vk::raii::CommandBuffer& cmd) {
+    size_t size = resultInfo.size;
+    staging = BufferFactory::createStagingBuffer(allocator, size);
+    copyBuffer(this->buffer, staging->getVkBuffer(), cmd, size);
+    return {staging->getMappedPtr(), size};
 }
 
 void StaticBuffer::deleteStaging() {
@@ -74,7 +84,7 @@ void StaticBuffer::deleteStaging() {
 std::unique_ptr<DynamicBuffer> BufferFactory::createStagingBuffer(const VmaAllocator& allocator, size_t size) {
     vk::BufferCreateInfo stagingInfo{
         .size = size,
-        .usage = vk::BufferUsageFlagBits::eTransferSrc,
+        .usage = vk::BufferUsageFlagBits::eTransferSrc | vk::BufferUsageFlagBits::eTransferDst,
         .sharingMode = vk::SharingMode::eExclusive,
     };
     VmaAllocationCreateInfo stagingAllocInfo = {
@@ -118,6 +128,14 @@ std::shared_ptr<StaticBuffer> BufferFactory::createStaticBuffer(
             allocInfo.requiredFlags = VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT;
             break;
         }
+        case Type::Storage: {
+            bufferInfo.usage =
+                vk::BufferUsageFlagBits::eStorageBuffer |
+                vk::BufferUsageFlagBits::eTransferDst |
+                vk::BufferUsageFlagBits::eTransferSrc;
+            allocInfo.requiredFlags = VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT;
+            break;
+        }
         default: {
             throw std::runtime_error("Not implement yet");
             break;
@@ -131,12 +149,12 @@ std::shared_ptr<DynamicBuffer> BufferFactory::createDynamicBuffer(
 ) {
     vk::BufferCreateInfo stagingInfo{
         .size = size,
-        .usage = vk::BufferUsageFlagBits::eUniformBuffer,
+        .usage = vk::BufferUsageFlagBits::eTransferDst | vk::BufferUsageFlagBits::eTransferSrc,
         .sharingMode = vk::SharingMode::eExclusive,
     };
     VmaAllocationCreateInfo allocInfo = {
         .flags =
-            VMA_ALLOCATION_CREATE_HOST_ACCESS_SEQUENTIAL_WRITE_BIT |
+            VMA_ALLOCATION_CREATE_HOST_ACCESS_RANDOM_BIT |
             VMA_ALLOCATION_CREATE_MAPPED_BIT,
         .usage = VMA_MEMORY_USAGE_AUTO,
         .requiredFlags = VK_MEMORY_PROPERTY_HOST_COHERENT_BIT

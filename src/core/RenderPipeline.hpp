@@ -20,9 +20,20 @@ struct GraphicsPipelineDesc {
     vk::Format depthFormat;
 };
 
+struct ComputePipelineDesc {
+    vk::PipelineLayout layout;
+    std::span<const uint8_t> shaderSpv;
+};
+
+
 std::shared_ptr<Pipeline> createGraphicsPipeline(
     const VulkanContext& context,
     const GraphicsPipelineDesc& desc
+);
+
+std::shared_ptr<Pipeline> createComputePipeline(
+    const VulkanContext& context,
+    const ComputePipelineDesc& desc
 );
 
 #endif  // RENDERPIPELINE_HPP
