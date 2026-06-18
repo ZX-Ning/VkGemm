@@ -185,7 +185,7 @@ vk::raii::PhysicalDevice pickPhysicalDevice(vk::raii::Instance& instance) {
         instance.enumeratePhysicalDevices();
 
     // vk::raii::PhysicalDevice* selectedDevice = nullptr;
-
+    std::vector<Ref<vk::raii::PhysicalDevice>> devicesFiltered;
     for (vk::raii::PhysicalDevice& device : devices) {
         // Check if the device supports the Vulkan 1.3 API version
         bool supportsVulkan1_3 =
@@ -193,10 +193,10 @@ vk::raii::PhysicalDevice pickPhysicalDevice(vk::raii::Instance& instance) {
 
         // Check if any of the queue families support graphics operations
         auto queueFamilies = device.getQueueFamilyProperties();
-        bool supportsGraphics = false;
+        bool supported = false;
         for (const vk::QueueFamilyProperties& qfp : queueFamilies) {
-            if (qfp.queueFlags & vk::QueueFlagBits::eGraphics) {
-                supportsGraphics = true;
+            if (qfp.queueFlags & (vk::QueueFlagBits::eGraphics | vk::QueueFlagBits::eCompute)) {
+                supported = true;
                 break;
             }
         }
@@ -231,13 +231,22 @@ vk::raii::PhysicalDevice pickPhysicalDevice(vk::raii::Instance& instance) {
             features.get<vk::PhysicalDeviceVulkan13Features>().dynamicRendering &&
             features.get<vk::PhysicalDeviceExtendedDynamicStateFeaturesEXT>().extendedDynamicState;
 
-        if (supportsVulkan1_3 && supportsGraphics &&
+        if (supportsVulkan1_3 && supported &&
             supportsAllRequiredExtensions && supportsRequiredFeatures) {
-            std::println("Device: {}", device.getProperties().deviceName.data());
+            devicesFiltered.push_back(device);
+        }
+    }
+    for (vk::raii::PhysicalDevice& device : devicesFiltered) {
+        auto props = device.getProperties();
+        if (props.deviceType == vk::PhysicalDeviceType::eDiscreteGpu) {
+            std::println("Device: {}", props.deviceName.data());
             return device;
         }
     }
-
+    if (!devices.empty()) {
+        std::println("Device: {}", devices[0].getProperties().deviceName.data());
+        return devices[0];
+    }
     throw std::runtime_error("failed to find a suitable GPU!");
 }
 

@@ -17,10 +17,15 @@ LoadedBuffer::LoadedBuffer(
     );
     if (result != VK_SUCCESS) {
         throw std::runtime_error(
-            std::format("Can not create buffer; usage: {}", vk::to_string(info.usage))
+            std::format("Can not create buffer: {}", static_cast<int>(result))
         );
     }
+    resultInfo.size = info.size;
     this->buffer = vk::Buffer(buffer);
+}
+
+size_t LoadedBuffer::size() const {
+    return this->resultInfo.size;
 }
 
 vk::Buffer LoadedBuffer::getVkBuffer() const {
@@ -47,6 +52,27 @@ uint8_t* DynamicBuffer::getMappedPtr() {
     return (uint8_t*)this->resultInfo.pMappedData;
 }
 
+void StaticBuffer::readBackSyncDangerous(VulkanContext& ctx, uint8_t* dst) {
+    size_t stagingSize = std::min(resultInfo.size, MAX_STAGGING_SIZE);
+    staging = BufferFactory::createStagingBuffer(allocator, stagingSize);
+    for (size_t offset = 0; offset < resultInfo.size; offset += MAX_STAGGING_SIZE) {
+        size_t copySize = std::min(MAX_STAGGING_SIZE, resultInfo.size - offset);
+        ctx.loadingCmdBuffer.begin({});
+        ctx.loadingCmdBuffer.copyBuffer(  // copy device buf to stagging
+            this->buffer,
+            staging->getVkBuffer(),
+            vk::BufferCopy{offset, 0, copySize}
+        );
+        ctx.loadingCmdBuffer.end();
+        ctx.queue.submit({
+            vk::SubmitInfo{}.setCommandBuffers({*ctx.loadingCmdBuffer}),
+        });
+        ctx.device.waitIdle();
+        std::memcpy(dst + offset, staging->getMappedPtr(), copySize);
+    }
+    deleteStaging();
+}
+
 StaticBuffer::StaticBuffer(
     const vk::BufferCreateInfo& info,
     const VmaAllocationCreateInfo& allocInfo,
@@ -70,7 +96,29 @@ void StaticBuffer::load(
     copyBuffer(staging->getVkBuffer(), this->buffer, cmd, size);
 }
 
-std::span<uint8_t> StaticBuffer::readBack(vk::raii::CommandBuffer& cmd) {
+void StaticBuffer::loadSync(std::span<const uint8_t> data, VulkanContext& ctx) {
+    size_t stagingSize = std::min(resultInfo.size, MAX_STAGGING_SIZE);
+    staging = BufferFactory::createStagingBuffer(allocator, stagingSize);
+    for (size_t offset = 0; offset < data.size_bytes(); offset += MAX_STAGGING_SIZE) {
+        size_t copySize = std::min(MAX_STAGGING_SIZE, resultInfo.size - offset);
+        auto slice = data.subspan(offset, copySize);
+        staging->update(slice);
+        ctx.loadingCmdBuffer.begin({});
+        ctx.loadingCmdBuffer.copyBuffer(
+            staging->getVkBuffer(),
+            this->buffer,
+            vk::BufferCopy{0, offset, copySize}
+        );
+        ctx.loadingCmdBuffer.end();
+        ctx.queue.submit({
+            vk::SubmitInfo{}.setCommandBuffers({*ctx.loadingCmdBuffer}),
+        });
+        ctx.device.waitIdle();
+    }
+    deleteStaging();
+}
+
+std::span<uint8_t> StaticBuffer::readBackToMapped(vk::raii::CommandBuffer& cmd) {
     size_t size = resultInfo.size;
     staging = BufferFactory::createStagingBuffer(allocator, size);
     copyBuffer(this->buffer, staging->getVkBuffer(), cmd, size);

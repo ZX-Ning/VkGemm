@@ -5,140 +5,115 @@
 #include "core/RenderPipeline.hpp"
 #include "core/VulkanContext.hpp"
 #include "utils.hpp"
+//
+#include <Eigen/Dense>
 
-constexpr int VEC_SIZE = 4096;
-constexpr int GROUP_SIZE = 256;
+constexpr size_t MAT_SIZE = 15000;
+constexpr size_t BUF_SIZE_FLOAT = MAT_SIZE * MAT_SIZE;
+constexpr int TILE_SIZE = 16;
+
+std::vector<vk::DescriptorSetLayoutBinding> createComputeBindingLayouts(int n) {
+    std::vector<vk::DescriptorSetLayoutBinding> result;
+    for (int i = 0; i < n; i++) {
+        result.push_back(vk::DescriptorSetLayoutBinding{
+            .binding = static_cast<unsigned>(i),
+            .descriptorType = vk::DescriptorType::eStorageBuffer,
+            .descriptorCount = 1,
+            .stageFlags = vk::ShaderStageFlagBits::eCompute,
+        });
+    }
+    return result;
+}
+
+void WriteDescriptorSet(
+    std::vector<const StaticBuffer*> bufs,
+    const vk::DescriptorSet& set,
+    const vk::raii::Device& device
+) {
+    std::vector<vk::DescriptorBufferInfo> infos;
+    std::vector<vk::WriteDescriptorSet> writes;
+    for (size_t i = 0; i < bufs.size(); i++) {
+        infos.push_back({
+            .buffer = bufs[i]->getVkBuffer(),
+            .offset = 0UL,
+            .range = bufs[i]->size(),
+        });
+    }
+    for (size_t i = 0; i < bufs.size(); i++) {
+        writes.push_back(
+            vk::WriteDescriptorSet{
+                .dstSet = set,
+                .dstBinding = static_cast<uint32_t>(i),
+                .dstArrayElement = 0,
+                .descriptorCount = 1,
+                .descriptorType = vk::DescriptorType::eStorageBuffer,
+            }
+                .setBufferInfo({infos[i]})
+        );
+    }
+    device.updateDescriptorSets(writes, {});
+}
 
 int main() {
     VulkanContext ctx{};
-    std::array bindingsLayout = {
-        vk::DescriptorSetLayoutBinding{
-            .binding = 0,
-            .descriptorType = vk::DescriptorType::eStorageBuffer,
-            .descriptorCount = 1,
-            .stageFlags = vk::ShaderStageFlagBits::eCompute
-        },
-        vk::DescriptorSetLayoutBinding{
-            .binding = 1,
-            .descriptorType = vk::DescriptorType::eStorageBuffer,
-            .descriptorCount = 1,
-            .stageFlags = vk::ShaderStageFlagBits::eCompute
-        },
-        vk::DescriptorSetLayoutBinding{
-            .binding = 2,
-            .descriptorType = vk::DescriptorType::eStorageBuffer,
-            .descriptorCount = 1,
-            .stageFlags = vk::ShaderStageFlagBits::eCompute
-        }
-    };
-    vk::raii::DescriptorSetLayout bindLayout(
-        ctx.device,
-        {
-            .bindingCount = 3,
-            .pBindings = bindingsLayout.data(),
-        }
+    auto bindslayouts = createComputeBindingLayouts(3);
+    auto setLayout = ctx.device.createDescriptorSetLayout(
+        vk::DescriptorSetLayoutCreateInfo{}
+            .setBindings(bindslayouts)
     );
+
     vk::PushConstantRange pcRange{
         .stageFlags = vk::ShaderStageFlagBits::eCompute,
         .offset = 0,
-        .size = sizeof(uint32_t),
+        .size = 3 * sizeof(uint32_t),
     };
 
-    vk::raii::PipelineLayout layout(
-        ctx.device,
-        {
-            .setLayoutCount = 1,
-            .pSetLayouts = &*bindLayout,
-            .pushConstantRangeCount = 1,
-            .pPushConstantRanges = &pcRange,
-        }
+    auto layout = ctx.device.createPipelineLayout(
+        vk::PipelineLayoutCreateInfo{}
+            .setSetLayouts({*setLayout})
+            .setPushConstantRanges({pcRange})
     );
     auto pipeline = createComputePipeline(
         ctx,
-        {.layout = layout, .shaderSpv = readFile("shaders/compute.spv")}
+        {.layout = layout, .shaderSpv = readFile("shaders/gemm.spv")}
     );
 
-    auto vec1Buffer =
-        BufferFactory::createStaticBuffer(BufferFactory::Type::Storage, *ctx.allocator, VEC_SIZE * sizeof(float));
-    auto vec2Buffer =
-        BufferFactory::createStaticBuffer(BufferFactory::Type::Storage, *ctx.allocator, VEC_SIZE * sizeof(float));
-    auto vecOutBuffer =
-        BufferFactory::createStaticBuffer(BufferFactory::Type::Storage, *ctx.allocator, VEC_SIZE * sizeof(float));
+    auto matABuf =
+        BufferFactory::createStaticBuffer(BufferFactory::Type::Storage, *ctx.allocator, BUF_SIZE_FLOAT * sizeof(float));
+    auto matBBuf =
+        BufferFactory::createStaticBuffer(BufferFactory::Type::Storage, *ctx.allocator, BUF_SIZE_FLOAT * sizeof(float));
+    auto matCBuf =
+        BufferFactory::createStaticBuffer(BufferFactory::Type::Storage, *ctx.allocator, BUF_SIZE_FLOAT * sizeof(float));
 
-    vk::DescriptorSetAllocateInfo allocInfo{
+    auto sets = ctx.device.allocateDescriptorSets({
         .descriptorPool = ctx.descriptorPool,
         .descriptorSetCount = 1,
-        .pSetLayouts = &*bindLayout
-    };
-    auto sets =
-        ctx.device.allocateDescriptorSets(allocInfo);
+        .pSetLayouts = &*setLayout,
+    });
 
-    vk::DescriptorBufferInfo bufInfo1 = {
-        .buffer = vec1Buffer->getVkBuffer(),
-        .offset = 0,
-        .range = VEC_SIZE * sizeof(float)
-    };
-    vk::DescriptorBufferInfo bufInfo2 = {
-        .buffer = vec2Buffer->getVkBuffer(),
-        .offset = 0,
-        .range = VEC_SIZE * sizeof(float)
-    };
-    vk::DescriptorBufferInfo bufInfoOut = {
-        .buffer = vecOutBuffer->getVkBuffer(),
-        .offset = 0,
-        .range = VEC_SIZE * sizeof(float)
-    };
-    ctx.device.updateDescriptorSets(
-        std::array{
-            vk::WriteDescriptorSet{
-                .dstSet = *sets[0],
-                .dstBinding = 0,
-                .dstArrayElement = 0,
-                .descriptorCount = 1,
-                .descriptorType = vk::DescriptorType::eStorageBuffer,
-                .pBufferInfo = &bufInfo1
-            },
-            vk::WriteDescriptorSet{
-                .dstSet = *sets[0],
-                .dstBinding = 1,
-                .dstArrayElement = 0,
-                .descriptorCount = 1,
-                .descriptorType = vk::DescriptorType::eStorageBuffer,
-                .pBufferInfo = &bufInfo2
-            },
-            vk::WriteDescriptorSet{
-                .dstSet = *sets[0],
-                .dstBinding = 2,
-                .dstArrayElement = 0,
-                .descriptorCount = 1,
-                .descriptorType = vk::DescriptorType::eStorageBuffer,
-                .pBufferInfo = &bufInfoOut
-            }
-        },
-        {}
+    WriteDescriptorSet(
+        {matABuf.get(), matBBuf.get(), matCBuf.get()}, *sets[0], ctx.device
     );
 
-    std::vector<float> vec1 =
-        std::ranges::views::iota(0, VEC_SIZE) |
-        std::ranges::views::transform([](int x) { return static_cast<float>(x); }) |
-        std::ranges::to<std::vector>();
+    Eigen::MatrixXf mat1(MAT_SIZE, MAT_SIZE);
+    Eigen::MatrixXf mat2(MAT_SIZE, MAT_SIZE);
+    mat1.setRandom();
+    mat2.setRandom();
 
-    std::vector<float> vec2(vec1);
-    assert(vec1.size() == VEC_SIZE);
-    assert(vec2.size() == VEC_SIZE);
-
+    auto time1 = getTimestampMs();
+    std::println("Loading data to VRAM...");
     ctx.loadingCmdBuffer.begin({});
-    vec1Buffer->load(asRawBytes(vec1), ctx.loadingCmdBuffer);
-    vec2Buffer->load(asRawBytes(vec2), ctx.loadingCmdBuffer);
+    matABuf->load(std::span((uint8_t*)mat1.data(), BUF_SIZE_FLOAT * sizeof(float)), ctx.loadingCmdBuffer);
+    matBBuf->load(std::span((uint8_t*)mat2.data(), BUF_SIZE_FLOAT * sizeof(float)), ctx.loadingCmdBuffer);
     ctx.loadingCmdBuffer.end();
     ctx.queue.submit({vk::SubmitInfo{
         .commandBufferCount = 1,
         .pCommandBuffers = &*ctx.loadingCmdBuffer,
     }});
     ctx.device.waitIdle();
-    vec1Buffer->deleteStaging();
-    vec2Buffer->deleteStaging();
-
+    matABuf->deleteStaging();
+    matBBuf->deleteStaging();
+    
     auto cmdBufs = ctx.device.allocateCommandBuffers({
         .commandPool = ctx.commandPool,
         .level = vk::CommandBufferLevel::ePrimary,
@@ -146,12 +121,17 @@ int main() {
     });
     assert(cmdBufs.size() == 1);
     auto& cmd = cmdBufs[0];
-
+    
     std::println("Begin Compute");
     cmd.begin({});
 
     cmd.bindPipeline(vk::PipelineBindPoint::eCompute, pipeline->pipeline);
-    cmd.pushConstants(layout, vk::ShaderStageFlagBits::eCompute, 0, vk::ArrayProxy<const uint32_t>{VEC_SIZE});
+    cmd.pushConstants(
+        layout,
+        vk::ShaderStageFlagBits::eCompute,
+        0,
+        vk::ArrayProxy<const uint32_t>{MAT_SIZE, MAT_SIZE, MAT_SIZE}
+    );
     cmd.bindDescriptorSets(
         vk::PipelineBindPoint::eCompute,
         layout,
@@ -159,25 +139,8 @@ int main() {
         std::array{*sets[0]},
         nullptr
     );
-    int groupCount = VEC_SIZE / GROUP_SIZE;
-    cmd.dispatch(groupCount, 1, 1);
-    vk::BufferMemoryBarrier2 barrier = {
-        .srcStageMask = vk::PipelineStageFlagBits2::eComputeShader,
-        .srcAccessMask = vk::AccessFlagBits2::eShaderStorageWrite,
-        .dstStageMask = vk::PipelineStageFlagBits2::eAllTransfer,
-        .dstAccessMask = vk::AccessFlagBits2::eTransferRead,
-        .buffer = vecOutBuffer->getVkBuffer(),
-        .offset = 0,
-        .size = VEC_SIZE * sizeof(float)
-    };
-    cmd.pipelineBarrier2(
-        vk::DependencyInfo{
-            .dependencyFlags = {},
-            .bufferMemoryBarrierCount = 1,
-            .pBufferMemoryBarriers = &barrier,
-        }
-    );
-    auto result = vecOutBuffer->readBack(cmd);
+    int groupCount = std::ceil((float)MAT_SIZE / TILE_SIZE);
+    cmd.dispatch(groupCount, groupCount, 1);
     cmd.end();
 
     const vk::SubmitInfo submitInfo{
@@ -188,13 +151,23 @@ int main() {
     };
     ctx.queue.submit(submitInfo, nullptr);
     ctx.device.waitIdle();
-    std::println("Compute Done");
+    std::println("Compute Done. Reading back result...");
+    std::println("Time used: {} ms", getTimestampMs() - time1);
+    auto result = matCBuf->readBackSync<float>(ctx);
+    std::println("Result read back. Begin CPU compute.");
 
-    std::span<float> resultCast{(float*)result.data(), VEC_SIZE};
-    for (int i = 0; i < VEC_SIZE; i++) {
-        if (std::abs(resultCast[i] - 2 * i) > 0.0001) {
-            throw std::runtime_error("Calculation Wrong!");
+    auto time2 = getTimestampMs();
+    Eigen::MatrixXf expected = mat1 * mat2;
+    std::println("CPU Calculation Done. Time used: {} ms. Validating...", getTimestampMs() - time2);
+
+#pragma omp parallel for
+    for (size_t i = 0; i < BUF_SIZE_FLOAT; i++) {
+        if (std::abs(result[i] - expected.data()[i]) > 0.1) {
+            std::println("Calculation Wrong! i = {}, expected {}, found: {}", i, expected.data()[i], result[i]);
+            exit(1);
         }
     }
+    std::println("Done.");
+
     return 0;
 }

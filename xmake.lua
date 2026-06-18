@@ -8,7 +8,7 @@ else
     add_requires("libsdl3", {system = false})
 end
 
-add_requires("glm", "vulkan-hpp", "vulkan-memory-allocator")
+add_requires("glm", "vulkan-hpp", "vulkan-memory-allocator", "eigen", "openmp")
 
 includes("third_party/")
 
@@ -16,7 +16,7 @@ target("learn_vulkan", function()
     set_kind("binary")
     set_languages("c17", "c++23")
     add_files("src/**.cpp")
-    add_packages("libsdl3", "glm", "vulkan-hpp", "vulkan-memory-allocator")
+    add_packages("libsdl3", "glm", "vulkan-hpp", "vulkan-memory-allocator", "eigen", "openmp")
     add_deps("imgui_vulkan_sdl3", "stb")
 
     add_defines("VK_NO_PROTOTYPES")
