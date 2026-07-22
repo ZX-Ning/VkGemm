@@ -21,14 +21,45 @@ constexpr bool ENABLE_VALIDATION_LAYERS = !IS_RELEASE;
 const std::vector<char const*> validationLayers = {
     "VK_LAYER_KHRONOS_validation"
 };
-const std::vector<const char*> requiredDeviceExtension = {
+const std::vector<const char*> requiredDeviceExtensions = {
     // vk::KHRSwapchainExtensionName,
     vk::KHRSpirv14ExtensionName,
     vk::KHRSynchronization2ExtensionName,
     vk::KHRCreateRenderpass2ExtensionName,
     vk::KHRDynamicRenderingExtensionName,
-    vk::EXTMemoryBudgetExtensionName
+    vk::EXTMemoryBudgetExtensionName,
+    vk::KHRCooperativeMatrixExtensionName
 };
+
+constexpr uint32_t COOPERATIVE_MATRIX_TILE_SIZE = 16;
+constexpr uint32_t COOPERATIVE_MATRIX_SUBGROUP_SIZE = 32;
+
+bool supportsRequiredCooperativeMatrixType(
+    const vk::raii::PhysicalDevice& device
+) {
+    const auto deviceProperties = device.getProperties2<
+        vk::PhysicalDeviceProperties2,
+        vk::PhysicalDeviceSubgroupProperties>();
+    if (deviceProperties.get<vk::PhysicalDeviceSubgroupProperties>().subgroupSize !=
+        COOPERATIVE_MATRIX_SUBGROUP_SIZE) {
+        return false;
+    }
+
+    const auto properties = device.getCooperativeMatrixPropertiesKHR();
+    for (const auto& property : properties) {
+        if (property.MSize == COOPERATIVE_MATRIX_TILE_SIZE &&
+            property.NSize == COOPERATIVE_MATRIX_TILE_SIZE &&
+            property.KSize == COOPERATIVE_MATRIX_TILE_SIZE &&
+            property.AType == vk::ComponentTypeKHR::eFloat16 &&
+            property.BType == vk::ComponentTypeKHR::eFloat16 &&
+            property.CType == vk::ComponentTypeKHR::eFloat32 &&
+            property.ResultType == vk::ComponentTypeKHR::eFloat32 &&
+            property.scope == vk::ScopeKHR::eSubgroup) {
+            return true;
+        }
+    }
+    return false;
+}
 
 std::vector<const char*> getRequiredExtensions() {
     // Uint32 sdlExtensionCount = 0;
@@ -47,28 +78,28 @@ std::vector<const char*> getRequiredExtensions() {
     return extensions;
 }
 
-vk::SurfaceFormatKHR chooseSwapSurfaceFormat(
-    const std::vector<vk::SurfaceFormatKHR>& availableFormats
-) {
-    assert(!availableFormats.empty());
-    for (const auto& format : availableFormats) {
-        if ((format.format == vk::Format::eB8G8R8A8Srgb ||
-             format.format == vk::Format::eR8G8B8A8Srgb) &&
-            format.colorSpace == vk::ColorSpaceKHR::eSrgbNonlinear) {
-            return format;
-        }
-    }
-    for (const auto& format : availableFormats) {
-        if ((format.format == vk::Format::eB8G8R8A8Unorm ||
-             format.format == vk::Format::eR8G8B8A8Unorm) &&
-            format.colorSpace == vk::ColorSpaceKHR::eSrgbNonlinear) {
-            std::println("Can not found Srgb Format, using Unorm.");
-            return format;
-        }
-    }
-    throw std::runtime_error("Format not supported yet");
-    // return availableFormats[0];
-}
+// vk::SurfaceFormatKHR chooseSwapSurfaceFormat(
+//     const std::vector<vk::SurfaceFormatKHR>& availableFormats
+// ) {
+//     assert(!availableFormats.empty());
+//     for (const auto& format : availableFormats) {
+//         if ((format.format == vk::Format::eB8G8R8A8Srgb ||
+//              format.format == vk::Format::eR8G8B8A8Srgb) &&
+//             format.colorSpace == vk::ColorSpaceKHR::eSrgbNonlinear) {
+//             return format;
+//         }
+//     }
+//     for (const auto& format : availableFormats) {
+//         if ((format.format == vk::Format::eB8G8R8A8Unorm ||
+//              format.format == vk::Format::eR8G8B8A8Unorm) &&
+//             format.colorSpace == vk::ColorSpaceKHR::eSrgbNonlinear) {
+//             std::println("Can not found Srgb Format, using Unorm.");
+//             return format;
+//         }
+//     }
+//     throw std::runtime_error("Format not supported yet");
+//     // return availableFormats[0];
+// }
 
 vk::raii::Instance createInstance(const vk::raii::Context& context) {
     constexpr vk::ApplicationInfo appInfo = {
@@ -191,11 +222,11 @@ vk::raii::PhysicalDevice pickPhysicalDevice(vk::raii::Instance& instance) {
         bool supportsVulkan1_3 =
             device.getProperties().apiVersion >= VK_API_VERSION_1_3;
 
-        // Check if any of the queue families support graphics operations
+        // Check if any queue family supports compute operations.
         auto queueFamilies = device.getQueueFamilyProperties();
         bool supported = false;
         for (const vk::QueueFamilyProperties& qfp : queueFamilies) {
-            if (qfp.queueFlags & (vk::QueueFlagBits::eGraphics | vk::QueueFlagBits::eCompute)) {
+            if (qfp.queueFlags & vk::QueueFlagBits::eCompute) {
                 supported = true;
                 break;
             }
@@ -205,10 +236,10 @@ vk::raii::PhysicalDevice pickPhysicalDevice(vk::raii::Instance& instance) {
         std::vector<vk::ExtensionProperties> availableDeviceExtensions =
             device.enumerateDeviceExtensionProperties();
         bool supportsAllRequiredExtensions = true;
-        for (auto const& requiredDeviceExtension : requiredDeviceExtension) {
+        for (const char* requiredExtension : requiredDeviceExtensions) {
             bool extensionFound = false;
             for (auto const& availableDeviceExtension : availableDeviceExtensions) {
-                if (strcmp(availableDeviceExtension.extensionName, requiredDeviceExtension) == 0) {
+                if (strcmp(availableDeviceExtension.extensionName, requiredExtension) == 0) {
                     extensionFound = true;
                     break;
                 }
@@ -219,23 +250,36 @@ vk::raii::PhysicalDevice pickPhysicalDevice(vk::raii::Instance& instance) {
             }
         }
 
+        if (!supportsVulkan1_3 || !supported ||
+            !supportsAllRequiredExtensions) {
+            continue;
+        }
+
         auto features = device.getFeatures2<
             vk::PhysicalDeviceFeatures2,
             vk::PhysicalDeviceVulkan11Features,
+            vk::PhysicalDeviceVulkan12Features,
             vk::PhysicalDeviceVulkan13Features,
-            vk::PhysicalDeviceExtendedDynamicStateFeaturesEXT>();
+            vk::PhysicalDeviceExtendedDynamicStateFeaturesEXT,
+            vk::PhysicalDeviceCooperativeMatrixFeaturesKHR>();
 
         bool supportsRequiredFeatures =
+            features.get<vk::PhysicalDeviceVulkan11Features>().storageBuffer16BitAccess &&
+            features.get<vk::PhysicalDeviceVulkan11Features>().uniformAndStorageBuffer16BitAccess &&
             features.get<vk::PhysicalDeviceVulkan11Features>().shaderDrawParameters &&
+            features.get<vk::PhysicalDeviceVulkan12Features>().shaderFloat16 &&
+            features.get<vk::PhysicalDeviceVulkan12Features>().vulkanMemoryModel &&
             features.get<vk::PhysicalDeviceVulkan13Features>().synchronization2 &&
             features.get<vk::PhysicalDeviceVulkan13Features>().dynamicRendering &&
-            features.get<vk::PhysicalDeviceExtendedDynamicStateFeaturesEXT>().extendedDynamicState;
+            features.get<vk::PhysicalDeviceExtendedDynamicStateFeaturesEXT>().extendedDynamicState &&
+            features.get<vk::PhysicalDeviceCooperativeMatrixFeaturesKHR>().cooperativeMatrix;
 
-        if (supportsVulkan1_3 && supported &&
-            supportsAllRequiredExtensions && supportsRequiredFeatures) {
+        if (supportsRequiredFeatures &&
+            supportsRequiredCooperativeMatrixType(device)) {
             devicesFiltered.push_back(device);
         }
     }
+    std::println("Support device count: {}", devicesFiltered.size());
     for (vk::raii::PhysicalDevice& device : devicesFiltered) {
         auto props = device.getProperties();
         if (props.deviceType == vk::PhysicalDeviceType::eDiscreteGpu) {
@@ -243,11 +287,14 @@ vk::raii::PhysicalDevice pickPhysicalDevice(vk::raii::Instance& instance) {
             return device;
         }
     }
-    if (!devices.empty()) {
-        std::println("Device: {}", devices[0].getProperties().deviceName.data());
-        return devices[0];
+    if (!devicesFiltered.empty()) {
+        auto& device = devicesFiltered.front().get();
+        std::println("Device: {}", device.getProperties().deviceName.data());
+        return device;
     }
-    throw std::runtime_error("failed to find a suitable GPU!");
+    throw std::runtime_error(
+        "failed to find a GPU supporting 16x16x16 fp16 cooperative matrix GEMM"
+    );
 }
 
 vk::raii::DescriptorPool createDescriptorPool(
@@ -301,30 +348,36 @@ void VulkanContext::initLogicalDevice() {
     std::vector<vk::QueueFamilyProperties> queueFamilyProperties =
         physicalDevice.getQueueFamilyProperties();
 
-    // get the first index into queueFamilyProperties which supports both
-    // graphics and present
+    // Get the first queue family that supports compute operations.
     uint32_t queueIndex = ~0;
     for (uint32_t qfpIndex = 0; qfpIndex < queueFamilyProperties.size(); qfpIndex++) {
-        if ((queueFamilyProperties[qfpIndex].queueFlags &
-             (vk::QueueFlagBits::eGraphics | vk::QueueFlagBits::eCompute))) {
-            // found a queue family that supports both graphics and present
+        if (queueFamilyProperties[qfpIndex].queueFlags &
+            vk::QueueFlagBits::eCompute) {
             queueIndex = qfpIndex;
             break;
         }
     }
     if (queueIndex == (uint32_t)~0) {
         throw std::runtime_error(
-            "Could not find a queue for graphics and present -> "
-            "terminating"
+            "Could not find a compute queue -> terminating"
         );
     }
 
     // query for Vulkan 1.3 features
     vk::StructureChain featureChain{
         vk::PhysicalDeviceFeatures2{},
-        vk::PhysicalDeviceVulkan11Features{.shaderDrawParameters = true},
+        vk::PhysicalDeviceVulkan11Features{
+            .storageBuffer16BitAccess = true,
+            .uniformAndStorageBuffer16BitAccess = true,
+            .shaderDrawParameters = true
+        },
+        vk::PhysicalDeviceVulkan12Features{
+            .shaderFloat16 = true,
+            .vulkanMemoryModel = true
+        },
         vk::PhysicalDeviceVulkan13Features{.synchronization2 = true, .dynamicRendering = true},
-        vk::PhysicalDeviceExtendedDynamicStateFeaturesEXT{.extendedDynamicState = true}
+        vk::PhysicalDeviceExtendedDynamicStateFeaturesEXT{.extendedDynamicState = true},
+        vk::PhysicalDeviceCooperativeMatrixFeaturesKHR{.cooperativeMatrix = true}
     };
 
     // create a Device
@@ -339,8 +392,8 @@ void VulkanContext::initLogicalDevice() {
         .queueCreateInfoCount = 1,
         .pQueueCreateInfos = &deviceQueueCreateInfo,
         .enabledExtensionCount =
-            static_cast<uint32_t>(requiredDeviceExtension.size()),
-        .ppEnabledExtensionNames = requiredDeviceExtension.data()
+            static_cast<uint32_t>(requiredDeviceExtensions.size()),
+        .ppEnabledExtensionNames = requiredDeviceExtensions.data()
     };
 
     this->device = vk::raii::Device(physicalDevice, deviceCreateInfo);

@@ -8,8 +8,8 @@
 //
 #include <Eigen/Dense>
 
-constexpr size_t MAT_SIZE = 15000;
-constexpr size_t BUF_SIZE_FLOAT = MAT_SIZE * MAT_SIZE;
+constexpr size_t MAT_SIZE = 1<<14;
+constexpr size_t BUF_SIZE = MAT_SIZE * MAT_SIZE;
 constexpr int TILE_SIZE = 16;
 
 std::vector<vk::DescriptorSetLayoutBinding> createComputeBindingLayouts(int n) {
@@ -75,15 +75,24 @@ int main() {
     );
     auto pipeline = createComputePipeline(
         ctx,
-        {.layout = layout, .shaderSpv = readFile("shaders/gemm.spv")}
+        {.layout = layout, .shaderSpv = readFile("shaders/gemm_coopmat.spv")}
     );
 
-    auto matABuf =
-        BufferFactory::createStaticBuffer(BufferFactory::Type::Storage, *ctx.allocator, BUF_SIZE_FLOAT * sizeof(float));
-    auto matBBuf =
-        BufferFactory::createStaticBuffer(BufferFactory::Type::Storage, *ctx.allocator, BUF_SIZE_FLOAT * sizeof(float));
-    auto matCBuf =
-        BufferFactory::createStaticBuffer(BufferFactory::Type::Storage, *ctx.allocator, BUF_SIZE_FLOAT * sizeof(float));
+    auto matABuf = BufferFactory::createStaticBuffer(
+        BufferFactory::Type::Storage,
+        *ctx.allocator,
+        BUF_SIZE * sizeof(Eigen::half)
+    );
+    auto matBBuf = BufferFactory::createStaticBuffer(
+        BufferFactory::Type::Storage,
+        *ctx.allocator,
+        BUF_SIZE * sizeof(Eigen::half)
+    );
+    auto matCBuf = BufferFactory::createStaticBuffer(
+        BufferFactory::Type::Storage,
+        *ctx.allocator,
+        BUF_SIZE * sizeof(float)
+    );
 
     auto sets = ctx.device.allocateDescriptorSets({
         .descriptorPool = ctx.descriptorPool,
@@ -92,20 +101,40 @@ int main() {
     });
 
     WriteDescriptorSet(
-        {matABuf.get(), matBBuf.get(), matCBuf.get()}, *sets[0], ctx.device
+        {
+            matABuf.get(),
+            matBBuf.get(),
+            matCBuf.get(),
+        },
+        *sets[0],
+        ctx.device
     );
 
-    Eigen::MatrixXf mat1(MAT_SIZE, MAT_SIZE);
-    Eigen::MatrixXf mat2(MAT_SIZE, MAT_SIZE);
+    Eigen::MatrixX<Eigen::half> mat1(MAT_SIZE, MAT_SIZE);
+    Eigen::MatrixX<Eigen::half> mat2(MAT_SIZE, MAT_SIZE);
+    Eigen::MatrixXf mat3(MAT_SIZE, MAT_SIZE);
     mat1.setRandom();
     mat2.setRandom();
+    mat3.setZero();
 
     auto time1 = getTimestampMs();
     std::println("Loading data to VRAM...");
     ctx.loadingCmdBuffer.begin({});
-    matABuf->load(std::span((uint8_t*)mat1.data(), BUF_SIZE_FLOAT * sizeof(float)), ctx.loadingCmdBuffer);
-    matBBuf->load(std::span((uint8_t*)mat2.data(), BUF_SIZE_FLOAT * sizeof(float)), ctx.loadingCmdBuffer);
-    ctx.loadingCmdBuffer.end();
+    {
+        matABuf->load(
+            std::span((uint8_t*)mat1.data(), BUF_SIZE * sizeof(Eigen::half)),
+            ctx.loadingCmdBuffer
+        );
+        matBBuf->load(
+            std::span((uint8_t*)mat2.data(), BUF_SIZE * sizeof(Eigen::half)),
+            ctx.loadingCmdBuffer
+        );
+        matCBuf->load(
+            std::span((uint8_t*)mat3.data(), BUF_SIZE * sizeof(float)),
+            ctx.loadingCmdBuffer
+        );
+        ctx.loadingCmdBuffer.end();
+    }
     ctx.queue.submit({vk::SubmitInfo{
         .commandBufferCount = 1,
         .pCommandBuffers = &*ctx.loadingCmdBuffer,
@@ -113,15 +142,17 @@ int main() {
     ctx.device.waitIdle();
     matABuf->deleteStaging();
     matBBuf->deleteStaging();
-    
-    auto cmdBufs = ctx.device.allocateCommandBuffers({
-        .commandPool = ctx.commandPool,
-        .level = vk::CommandBufferLevel::ePrimary,
-        .commandBufferCount = 1,
-    });
+    matCBuf->deleteStaging();
+
+    auto cmdBufs =
+        ctx.device.allocateCommandBuffers({
+            .commandPool = ctx.commandPool,
+            .level = vk::CommandBufferLevel::ePrimary,
+            .commandBufferCount = 1,
+        });
     assert(cmdBufs.size() == 1);
     auto& cmd = cmdBufs[0];
-    
+
     std::println("Begin Compute");
     cmd.begin({});
 
@@ -139,7 +170,8 @@ int main() {
         std::array{*sets[0]},
         nullptr
     );
-    int groupCount = std::ceil((float)MAT_SIZE / TILE_SIZE);
+    assert(MAT_SIZE % TILE_SIZE == 0);
+    int groupCount = MAT_SIZE / TILE_SIZE;
     cmd.dispatch(groupCount, groupCount, 1);
     cmd.end();
 
@@ -157,11 +189,11 @@ int main() {
     std::println("Result read back. Begin CPU compute.");
 
     auto time2 = getTimestampMs();
-    Eigen::MatrixXf expected = mat1 * mat2;
-    std::println("CPU Calculation Done. Time used: {} ms. Validating...", getTimestampMs() - time2);
+    Eigen::MatrixXf expected = mat1.cast<float>() * mat2.cast<float>();
+    std::println("CPU Calculation Done. Time used: {} ms. Validzating...", getTimestampMs() - time2);
 
 #pragma omp parallel for
-    for (size_t i = 0; i < BUF_SIZE_FLOAT; i++) {
+    for (size_t i = 0; i < BUF_SIZE; i++) {
         if (std::abs(result[i] - expected.data()[i]) > 0.1) {
             std::println("Calculation Wrong! i = {}, expected {}, found: {}", i, expected.data()[i], result[i]);
             exit(1);
