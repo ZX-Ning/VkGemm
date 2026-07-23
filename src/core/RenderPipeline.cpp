@@ -151,6 +151,7 @@ std::shared_ptr<Pipeline> createComputePipeline(
     };
     specInfo.setMapEntries(mapEntries);
     vk::ComputePipelineCreateInfo compPipeInfo = {
+        .flags = vk::PipelineCreateFlagBits::eDispatchBase,
         .stage = vk::PipelineShaderStageCreateInfo{
             .stage = vk::ShaderStageFlagBits::eCompute,
             .module = shaderModule,

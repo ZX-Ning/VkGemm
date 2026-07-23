@@ -1,3 +1,4 @@
+#include <algorithm>
 #include <print>
 #include <ranges>
 
@@ -8,9 +9,10 @@
 //
 #include <Eigen/Dense>
 
-constexpr size_t MAT_SIZE = 1 << 13;
+constexpr size_t MAT_SIZE = 1 << 14;
 constexpr size_t BUF_SIZE = MAT_SIZE * MAT_SIZE;
 constexpr int TILE_SIZE = 16;
+constexpr uint32_t MAX_GROUP_ROWS_PER_SUBMISSION = 64;
 
 std::vector<vk::DescriptorSetLayoutBinding> createComputeBindingLayouts(int n) {
     std::vector<vk::DescriptorSetLayoutBinding> result;
@@ -154,36 +156,44 @@ int main() {
     auto& cmd = cmdBufs[0];
 
     std::println("Begin Compute");
-    cmd.begin({});
-
-    cmd.bindPipeline(vk::PipelineBindPoint::eCompute, pipeline->pipeline);
-    cmd.pushConstants(
-        layout,
-        vk::ShaderStageFlagBits::eCompute,
-        0,
-        vk::ArrayProxy<const uint32_t>{MAT_SIZE, MAT_SIZE, MAT_SIZE}
-    );
-    cmd.bindDescriptorSets(
-        vk::PipelineBindPoint::eCompute,
-        layout,
-        0,
-        std::array{*sets[0]},
-        nullptr
-    );
     assert(MAT_SIZE % TILE_SIZE == 0);
-    int groupCount = MAT_SIZE / TILE_SIZE;
-    cmd.dispatch(groupCount, groupCount, 1);
-    cmd.end();
+    const uint32_t groupCount = MAT_SIZE / TILE_SIZE;
+    const auto time1 = getTimestampMs();
 
-    const vk::SubmitInfo submitInfo{
-        .waitSemaphoreCount = 0,
-        .commandBufferCount = 1,
-        .pCommandBuffers = &*cmd,
-        .signalSemaphoreCount = 0
-    };
-    ctx.queue.submit(submitInfo, nullptr);
-    auto time1 = getTimestampMs();
-    ctx.device.waitIdle();
+    for (uint32_t baseGroupY = 0; baseGroupY < groupCount;
+         baseGroupY += MAX_GROUP_ROWS_PER_SUBMISSION) {
+        const uint32_t groupRows = std::min(
+            MAX_GROUP_ROWS_PER_SUBMISSION,
+            groupCount - baseGroupY
+        );
+
+        cmd.begin({});
+        cmd.bindPipeline(vk::PipelineBindPoint::eCompute, pipeline->pipeline);
+        cmd.pushConstants(
+            layout,
+            vk::ShaderStageFlagBits::eCompute,
+            0,
+            vk::ArrayProxy<const uint32_t>{MAT_SIZE, MAT_SIZE, MAT_SIZE}
+        );
+        cmd.bindDescriptorSets(
+            vk::PipelineBindPoint::eCompute,
+            layout,
+            0,
+            std::array{*sets[0]},
+            nullptr
+        );
+        cmd.dispatchBase(0, baseGroupY, 0, groupCount, groupRows, 1);
+        cmd.end();
+
+        const vk::SubmitInfo submitInfo{
+            .waitSemaphoreCount = 0,
+            .commandBufferCount = 1,
+            .pCommandBuffers = &*cmd,
+            .signalSemaphoreCount = 0
+        };
+        ctx.queue.submit(submitInfo, nullptr);
+        ctx.queue.waitIdle();
+    }
     std::println("Time used: {} ms", getTimestampMs() - time1);
     std::println("Compute Done. Reading back result...");
     auto result = matCBuf->readBackSync<float>(ctx);
