@@ -187,7 +187,7 @@ int main() {
 
     std::println("Begin Compute");
     assert(MAT_SIZE % TILE_SIZE == 0);
-    const uint32_t groupCount = MAT_SIZE / TILE_SIZE;
+    const uint32_t groupCount = (MAT_SIZE + TILE_SIZE - 1) / TILE_SIZE;
     const auto time1 = getTimestampMs();
 
     for (uint32_t baseGroupY = 0; baseGroupY < groupCount;
