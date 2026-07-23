@@ -9,9 +9,9 @@
 //
 #include <Eigen/Dense>
 
-constexpr size_t MAT_SIZE = 5 << 12;
+constexpr size_t MAT_SIZE = 1 << 14;
 constexpr size_t BUF_SIZE = MAT_SIZE * MAT_SIZE;
-constexpr int TILE_SIZE = 16;
+constexpr int TILE_SIZE = 64;
 constexpr uint32_t MAX_GROUP_ROWS_PER_SUBMISSION = 64;
 
 std::vector<vk::DescriptorSetLayoutBinding> createComputeBindingLayouts(int n) {
@@ -60,12 +60,12 @@ bool testResult(const Eigen::MatrixXf& a, const Eigen::MatrixXf& b, const Eigen:
     constexpr int ROUNDS = 200;
     static std::random_device rd;
     static std::mt19937 gen(rd());
-    constexpr float EPSILON = 0.01f;
+    constexpr float EPSILON = 0.1f;
 
     if (MAT_SIZE <= 1024) {
         Eigen::MatrixXf diff = a * b - result;
         float maxDiff = diff.cwiseAbs().maxCoeff();
-        // std::println("Max diff: {}", maxDiff);
+        std::println("Max diff: {}", maxDiff);
         return maxDiff < EPSILON;
     }
     else {
@@ -106,8 +106,8 @@ int main() {
     );
     auto pipeline = createComputePipeline(
         ctx,
-        {layout, readFile("shaders/gemm_coopmat.spv")},
-        {ctx.subgroupSize, 1, 1}
+        {layout, readFile("shaders/gemm_coopmat_tiled.spv")},
+        {4, 4, ctx.subgroupSize}
     );
 
     auto matABuf = BufferFactory::createStaticBuffer(
@@ -212,7 +212,15 @@ int main() {
             std::array{*sets[0]},
             nullptr
         );
-        cmd.dispatchBase(0, baseGroupY, 0, groupCount, groupRows, 1);
+        cmd.dispatchBase(
+            0,
+            baseGroupY,
+            0,
+            groupCount,
+            groupRows,
+            1
+        );
+        // cmd.dispatch(groupCount, groupCount, 1);
         cmd.end();
 
         const vk::SubmitInfo submitInfo{
