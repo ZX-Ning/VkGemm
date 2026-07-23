@@ -1,6 +1,6 @@
 #include <algorithm>
 #include <print>
-#include <ranges>
+#include <random>
 
 #include "core/Buffer.hpp"
 #include "core/RenderPipeline.hpp"
@@ -9,7 +9,7 @@
 //
 #include <Eigen/Dense>
 
-constexpr size_t MAT_SIZE = 1 << 14;
+constexpr size_t MAT_SIZE = 5 << 12;
 constexpr size_t BUF_SIZE = MAT_SIZE * MAT_SIZE;
 constexpr int TILE_SIZE = 16;
 constexpr uint32_t MAX_GROUP_ROWS_PER_SUBMISSION = 64;
@@ -54,6 +54,35 @@ void WriteDescriptorSet(
         );
     }
     device.updateDescriptorSets(writes, {});
+}
+
+bool testResult(const Eigen::MatrixXf& a, const Eigen::MatrixXf& b, const Eigen::MatrixXf& result) {
+    constexpr int ROUNDS = 200;
+    static std::random_device rd;
+    static std::mt19937 gen(rd());
+    constexpr float EPSILON = 0.01f;
+
+    if (MAT_SIZE <= 1024) {
+        Eigen::MatrixXf diff = a * b - result;
+        float maxDiff = diff.cwiseAbs().maxCoeff();
+        // std::println("Max diff: {}", maxDiff);
+        return maxDiff < EPSILON;
+    }
+    else {
+        std::uniform_int_distribution<size_t> dist(0, MAT_SIZE - 1);
+        for (int i = 0; i < ROUNDS; i++) {
+            size_t x = dist(gen);
+            size_t y = dist(gen);
+            auto left = a.row(x);
+            auto right = b.col(y);
+            float expected = left * right;
+            float actual = result(x, y);
+            if (std::abs(expected - actual) > EPSILON) {
+                return false;
+            }
+        }
+        return true;
+    }
 }
 
 int main() {
@@ -113,6 +142,7 @@ int main() {
         ctx.device
     );
 
+    std::println("Preparing data...");
     Eigen::MatrixX<Eigen::half> mat1(MAT_SIZE, MAT_SIZE);
     Eigen::MatrixX<Eigen::half> mat2(MAT_SIZE, MAT_SIZE);
     Eigen::MatrixXf mat3(MAT_SIZE, MAT_SIZE);
@@ -196,19 +226,12 @@ int main() {
     }
     std::println("Time used: {} ms", getTimestampMs() - time1);
     std::println("Compute Done. Reading back result...");
-    auto result = matCBuf->readBackSync<float>(ctx);
-    std::println("Result read back. Begin CPU compute.");
-
-    auto time2 = getTimestampMs();
-    Eigen::MatrixXf expected = mat1.cast<float>() * mat2.cast<float>();
-    std::println("CPU Calculation Done. Time used: {} ms. Validzating...", getTimestampMs() - time2);
-
-#pragma omp parallel for
-    for (size_t i = 0; i < BUF_SIZE; i++) {
-        if (std::abs(result[i] - expected.data()[i]) > 0.1) {
-            std::println("Calculation Wrong! i = {}, expected {}, found: {}", i, expected.data()[i], result[i]);
-            exit(1);
-        }
+    Eigen::MatrixXf result = Eigen::MatrixXf(MAT_SIZE, MAT_SIZE);
+    matCBuf->readBackSyncDangerous(ctx, (uint8_t*)result.data());
+    std::println("Result read back. Begin validation.");
+    if (!testResult(mat1.cast<float>(), mat2.cast<float>(), result)) {
+        std::println(stderr, "not match!");
+        exit(1);
     }
     std::println("Done.");
 

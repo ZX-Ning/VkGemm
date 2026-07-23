@@ -56,22 +56,21 @@ const static let COL_MAJ = linalg::CoopMatMatrixLayout::ColumnMajor;
 [[shader("compute")]]
 [[numthreads(NUM_THREADS_X, NUM_THREADS_Y, NUM_THREADS_Z)]]
 void main(uint3 gid: SV_GroupID) {
-    uint offset_x = gid.x * TILE_SIZE;
-    uint offset_y = gid.y * TILE_SIZE;
+    uint row_offset = gid.x * TILE_SIZE;
+    uint col_offset = gid.y * TILE_SIZE;
 
     MatACC acc = MatACC.Load<COL_MAJ>(
-        mat_acc, offset_y * shape.M + offset_x, shape.M
+        mat_acc, col_offset * shape.M + row_offset, shape.M
     );
 
     for (uint t = 0; t < shape.K; t += TILE_SIZE) {
-        // A: fix x=offset_x, slide y=t
-        // B: fix y=offset_y, slide x=t
-        MatA a = MatA.Load<COL_MAJ>(mat_a, t * shape.M + offset_x, shape.M);
-        MatB b = MatB.Load<COL_MAJ>(mat_b, offset_y * shape.K + t, shape.K);
+        // A: fix x=row_offset, slide y=t
+        // B: fix y=col_offset, slide x=t
+        MatA a = MatA.Load<COL_MAJ>(mat_a, t * shape.M + row_offset, shape.M);
+        MatB b = MatB.Load<COL_MAJ>(mat_b, col_offset * shape.K + t, shape.K);
         acc = linalg::coopMatMulAdd<float, false>(a, b, acc);
     }
 
-    acc.Store<COL_MAJ>(mat_acc, offset_y * shape.M + offset_x, shape.M);
+    acc.Store<COL_MAJ>(mat_acc, col_offset * shape.M + row_offset, shape.M);
 }
-
 

@@ -58,10 +58,9 @@ public:
 struct StaticBuffer : public LoadedBuffer {
 private:
     std::unique_ptr<DynamicBuffer> staging;
-    void readBackSyncDangerous(VulkanContext& ctx, uint8_t* dst);
     // size_t size;
-
-public:
+    
+    public:
     StaticBuffer(
         const vk::BufferCreateInfo& info,
         const VmaAllocationCreateInfo& allocInfo,
@@ -70,6 +69,7 @@ public:
     static void copyBuffer(vk::Buffer src, vk::Buffer dst, vk::raii::CommandBuffer& cmd, vk::DeviceSize size);
     void load(std::span<const uint8_t> data, vk::raii::CommandBuffer& cmd);
     void loadSync(std::span<const uint8_t> data, VulkanContext& ctx);
+    void readBackSyncDangerous(VulkanContext& ctx, uint8_t* dst);
     std::span<uint8_t> readBackToMapped(vk::raii::CommandBuffer& cmd);
     template <class T>
     std::vector<T> readBackSync(VulkanContext& ctx);
