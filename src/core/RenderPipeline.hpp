@@ -25,7 +25,6 @@ struct ComputePipelineDesc {
     std::span<const uint8_t> shaderSpv;
 };
 
-
 std::shared_ptr<Pipeline> createGraphicsPipeline(
     const VulkanContext& context,
     const GraphicsPipelineDesc& desc
@@ -33,7 +32,8 @@ std::shared_ptr<Pipeline> createGraphicsPipeline(
 
 std::shared_ptr<Pipeline> createComputePipeline(
     const VulkanContext& context,
-    const ComputePipelineDesc& desc
+    const ComputePipelineDesc& desc,
+    const std::array<uint32_t, 3> numthreads
 );
 
 #endif  // RENDERPIPELINE_HPP

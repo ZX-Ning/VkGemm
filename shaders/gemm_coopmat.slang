@@ -1,5 +1,14 @@
 #define TILE_SIZE 16
-#define SUBGROUP_SIZE 32
+// #define SUBGROUP_SIZE 32
+
+[vk::constant_id(0)]
+const uint NUM_THREADS_X;
+
+[vk::constant_id(1)]
+const uint NUM_THREADS_Y;
+
+[vk::constant_id(2)]
+const uint NUM_THREADS_Z;
 
 [[vk_binding(0, 0)]]
 StructuredBuffer<half> mat_a;
@@ -45,7 +54,7 @@ typealias MatACC = linalg::CoopMat<
 const static let COL_MAJ = linalg::CoopMatMatrixLayout::ColumnMajor;
 
 [[shader("compute")]]
-[[numthreads(SUBGROUP_SIZE, 1, 1)]]
+[[numthreads(NUM_THREADS_X, NUM_THREADS_Y, NUM_THREADS_Z)]]
 void main(uint3 gid: SV_GroupID) {
     uint offset_x = gid.x * TILE_SIZE;
     uint offset_y = gid.y * TILE_SIZE;

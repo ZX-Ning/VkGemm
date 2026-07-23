@@ -28,23 +28,16 @@ const std::vector<const char*> requiredDeviceExtensions = {
     vk::KHRCreateRenderpass2ExtensionName,
     vk::KHRDynamicRenderingExtensionName,
     vk::EXTMemoryBudgetExtensionName,
-    vk::KHRCooperativeMatrixExtensionName
+    vk::KHRCooperativeMatrixExtensionName,
+    vk::KHRMaintenance4ExtensionName
 };
 
 constexpr uint32_t COOPERATIVE_MATRIX_TILE_SIZE = 16;
-constexpr uint32_t COOPERATIVE_MATRIX_SUBGROUP_SIZE = 32;
+// constexpr uint32_t COOPERATIVE_MATRIX_SUBGROUP_SIZE = 32;
 
 bool supportsRequiredCooperativeMatrixType(
     const vk::raii::PhysicalDevice& device
 ) {
-    const auto deviceProperties = device.getProperties2<
-        vk::PhysicalDeviceProperties2,
-        vk::PhysicalDeviceSubgroupProperties>();
-    if (deviceProperties.get<vk::PhysicalDeviceSubgroupProperties>().subgroupSize !=
-        COOPERATIVE_MATRIX_SUBGROUP_SIZE) {
-        return false;
-    }
-
     const auto properties = device.getCooperativeMatrixPropertiesKHR();
     for (const auto& property : properties) {
         if (property.MSize == COOPERATIVE_MATRIX_TILE_SIZE &&
@@ -215,6 +208,25 @@ vk::raii::PhysicalDevice pickPhysicalDevice(vk::raii::Instance& instance) {
     std::vector<vk::raii::PhysicalDevice> devices =
         instance.enumeratePhysicalDevices();
 
+    // for (size_t i = 0; i < devices.size(); i++) {
+    //     const auto& d = devices[i];
+    //     const auto props = d.getProperties2<
+    //         vk::PhysicalDeviceProperties2,
+    //         vk::PhysicalDeviceSubgroupProperties,
+    //         vk::PhysicalDeviceSubgroupSizeControlProperties>();
+    //     uint32_t subgroupSize = props.get<vk::PhysicalDeviceSubgroupProperties>().subgroupSize;
+    //     auto subgroupctrlProps = props.get<vk::PhysicalDeviceSubgroupSizeControlProperties>();
+    //     auto props2 = props.get<vk::PhysicalDeviceProperties2>().properties;
+    //     std::println(
+    //         "Device {}: {}, default subgroupSize={} (min={}, max={})",
+    //         i,
+    //         props2.deviceName.data(),
+    //         subgroupSize,
+    //         subgroupctrlProps.minSubgroupSize,
+    //         subgroupctrlProps.maxSubgroupSize
+    //     );
+    // }
+
     // vk::raii::PhysicalDevice* selectedDevice = nullptr;
     std::vector<Ref<vk::raii::PhysicalDevice>> devicesFiltered;
     for (vk::raii::PhysicalDevice& device : devices) {
@@ -271,6 +283,7 @@ vk::raii::PhysicalDevice pickPhysicalDevice(vk::raii::Instance& instance) {
             features.get<vk::PhysicalDeviceVulkan12Features>().vulkanMemoryModel &&
             features.get<vk::PhysicalDeviceVulkan13Features>().synchronization2 &&
             features.get<vk::PhysicalDeviceVulkan13Features>().dynamicRendering &&
+            features.get<vk::PhysicalDeviceVulkan13Features>().maintenance4 &&
             features.get<vk::PhysicalDeviceExtendedDynamicStateFeaturesEXT>().extendedDynamicState &&
             features.get<vk::PhysicalDeviceCooperativeMatrixFeaturesKHR>().cooperativeMatrix;
 
@@ -283,13 +296,11 @@ vk::raii::PhysicalDevice pickPhysicalDevice(vk::raii::Instance& instance) {
     for (vk::raii::PhysicalDevice& device : devicesFiltered) {
         auto props = device.getProperties();
         if (props.deviceType == vk::PhysicalDeviceType::eDiscreteGpu) {
-            std::println("Device: {}", props.deviceName.data());
             return device;
         }
     }
     if (!devicesFiltered.empty()) {
         auto& device = devicesFiltered.front().get();
-        std::println("Device: {}", device.getProperties().deviceName.data());
         return device;
     }
     throw std::runtime_error(
@@ -322,6 +333,13 @@ VulkanContext::VulkanContext() {
     this->debugMessenger = setupDebugMessenger(instance);
     // this->surface = windowApp.createSurface(instance);
     this->physicalDevice = pickPhysicalDevice(instance);
+    auto propsChain = this->physicalDevice.getProperties2<
+        vk::PhysicalDeviceProperties2,
+        vk::PhysicalDeviceSubgroupProperties>();
+    auto props2 = propsChain.get<vk::PhysicalDeviceProperties2>();
+    this->subgroupSize = propsChain.get<vk::PhysicalDeviceSubgroupProperties>().subgroupSize;
+    std::println("Device: {}, subgroupSize={}", props2.properties.deviceName.data(), this->subgroupSize);
+
     initLogicalDevice();
     initVmaAllocator();
     // Create command pool
@@ -375,7 +393,11 @@ void VulkanContext::initLogicalDevice() {
             .shaderFloat16 = true,
             .vulkanMemoryModel = true
         },
-        vk::PhysicalDeviceVulkan13Features{.synchronization2 = true, .dynamicRendering = true},
+        vk::PhysicalDeviceVulkan13Features{
+            .synchronization2 = true,
+            .dynamicRendering = true,
+            .maintenance4 = true
+        },
         vk::PhysicalDeviceExtendedDynamicStateFeaturesEXT{.extendedDynamicState = true},
         vk::PhysicalDeviceCooperativeMatrixFeaturesKHR{.cooperativeMatrix = true}
     };

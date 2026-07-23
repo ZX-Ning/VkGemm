@@ -22,6 +22,7 @@ struct VulkanContext {
     uint32_t queueFamilyIndex = ~0;
     vk::raii::CommandBuffer loadingCmdBuffer{nullptr};
     vk::raii::DescriptorPool descriptorPool{nullptr};
+    uint32_t subgroupSize;
 
     VmaAllocatorWrapper allocator;
     // vk::SurfaceFormatKHR surfaceFormat;

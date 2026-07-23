@@ -53,6 +53,7 @@ uint8_t* DynamicBuffer::getMappedPtr() {
 }
 
 void StaticBuffer::readBackSyncDangerous(VulkanContext& ctx, uint8_t* dst) {
+    ctx.device.waitIdle();
     size_t stagingSize = std::min(resultInfo.size, MAX_STAGGING_SIZE);
     staging = BufferFactory::createStagingBuffer(allocator, stagingSize);
     for (size_t offset = 0; offset < resultInfo.size; offset += MAX_STAGGING_SIZE) {
@@ -97,6 +98,7 @@ void StaticBuffer::load(
 }
 
 void StaticBuffer::loadSync(std::span<const uint8_t> data, VulkanContext& ctx) {
+    ctx.device.waitIdle();
     size_t stagingSize = std::min(resultInfo.size, MAX_STAGGING_SIZE);
     staging = BufferFactory::createStagingBuffer(allocator, stagingSize);
     for (size_t offset = 0; offset < data.size_bytes(); offset += MAX_STAGGING_SIZE) {

@@ -8,7 +8,7 @@
 //
 #include <Eigen/Dense>
 
-constexpr size_t MAT_SIZE = 1<<14;
+constexpr size_t MAT_SIZE = 1 << 13;
 constexpr size_t BUF_SIZE = MAT_SIZE * MAT_SIZE;
 constexpr int TILE_SIZE = 16;
 
@@ -75,7 +75,8 @@ int main() {
     );
     auto pipeline = createComputePipeline(
         ctx,
-        {.layout = layout, .shaderSpv = readFile("shaders/gemm_coopmat.spv")}
+        {layout, readFile("shaders/gemm_coopmat.spv")},
+        {ctx.subgroupSize, 1, 1}
     );
 
     auto matABuf = BufferFactory::createStaticBuffer(
@@ -117,7 +118,6 @@ int main() {
     mat2.setRandom();
     mat3.setZero();
 
-    auto time1 = getTimestampMs();
     std::println("Loading data to VRAM...");
     ctx.loadingCmdBuffer.begin({});
     {
@@ -182,9 +182,10 @@ int main() {
         .signalSemaphoreCount = 0
     };
     ctx.queue.submit(submitInfo, nullptr);
+    auto time1 = getTimestampMs();
     ctx.device.waitIdle();
-    std::println("Compute Done. Reading back result...");
     std::println("Time used: {} ms", getTimestampMs() - time1);
+    std::println("Compute Done. Reading back result...");
     auto result = matCBuf->readBackSync<float>(ctx);
     std::println("Result read back. Begin CPU compute.");
 

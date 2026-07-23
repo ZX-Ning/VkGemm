@@ -123,15 +123,39 @@ std::shared_ptr<Pipeline> createGraphicsPipeline(
 
 std::shared_ptr<Pipeline> createComputePipeline(
     const VulkanContext& context,
-    const ComputePipelineDesc& desc
+    const ComputePipelineDesc& desc,
+    const std::array<uint32_t, 3> numthreads
 ) {
     vk::raii::ShaderModule shaderModule =
         createShaderModule(context.device, desc.shaderSpv);
+    std::array mapEntries = {
+        vk::SpecializationMapEntry{
+            .constantID = 0,
+            .offset = 0,
+            .size = 4
+        },
+        vk::SpecializationMapEntry{
+            .constantID = 1,
+            .offset = 4,
+            .size = 4
+        },
+        vk::SpecializationMapEntry{
+            .constantID = 2,
+            .offset = 2 * 4,
+            .size = 4
+        },
+    };
+    vk::SpecializationInfo specInfo = {
+        .dataSize = 3 * 4,
+        .pData = numthreads.data(),
+    };
+    specInfo.setMapEntries(mapEntries);
     vk::ComputePipelineCreateInfo compPipeInfo = {
         .stage = vk::PipelineShaderStageCreateInfo{
             .stage = vk::ShaderStageFlagBits::eCompute,
             .module = shaderModule,
-            .pName = "main"
+            .pName = "main",
+            .pSpecializationInfo = &specInfo
         },
         .layout = desc.layout
     };

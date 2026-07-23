@@ -1,9 +1,19 @@
 #define TILE_SIZE 16
+
+[vk::constant_id(0)]
+const uint NUM_THREADS_X;
+
+[vk::constant_id(1)]
+const uint NUM_THREADS_Y;
+
+[vk::constant_id(2)]
+const uint NUM_THREADS_Z;
+
 [[vk_binding(0, 0)]]
-StructuredBuffer<float> mat_A;
+StructuredBuffer<half> mat_A;
 
 [[vk_binding(1, 0)]]
-StructuredBuffer<float> mat_B;
+StructuredBuffer<half> mat_B;
 
 [[vk_binding(2, 0)]]
 RWStructuredBuffer<float> mat_C;
@@ -24,11 +34,11 @@ ConstantBuffer<Shape> shape;
 
 // col major
 [[ForceInline]]
-inline float get_A_or_0(uint x, uint y) {
+inline half get_A_or_0(uint x, uint y) {
     return x < shape.M && y < shape.K ? mat_A[y * shape.M + x] : 0.f;
 }
 [[ForceInline]]
-inline float get_B_or_0(uint x, uint y) {
+inline half get_B_or_0(uint x, uint y) {
     return x < shape.K && y < shape.N ? mat_B[y * shape.K + x] : 0.f;
 }
 
@@ -38,11 +48,11 @@ inline void set_C_safe(uint x, uint y, float value) {
         mat_C[y * shape.M + x] = value;
 }
 
-groupshared float As[TILE_SIZE][TILE_SIZE + 1];
-groupshared float Bs[TILE_SIZE][TILE_SIZE + 1];
+groupshared half As[TILE_SIZE][TILE_SIZE + 1];
+groupshared half Bs[TILE_SIZE][TILE_SIZE + 1];
 
 [[shader("compute")]]
-[[numthreads(TILE_SIZE, TILE_SIZE, 1)]]
+[[numthreads(NUM_THREADS_X, NUM_THREADS_Y, NUM_THREADS_Z)]]
 void main(uint3 gid: SV_GroupID, uint3 tid: SV_GroupThreadID) {
     uint offset_x = gid.x * TILE_SIZE;
     uint offset_y = gid.y * TILE_SIZE;
