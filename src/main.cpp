@@ -9,9 +9,6 @@
 //
 #include <Eigen/Dense>
 
-constexpr size_t MAT_SIZE = 1 << 14;
-constexpr size_t BUF_SIZE = MAT_SIZE * MAT_SIZE;
-constexpr int TILE_SIZE = 64;
 constexpr uint32_t MAX_GROUP_ROWS_PER_SUBMISSION = 64;
 
 std::vector<vk::DescriptorSetLayoutBinding> createComputeBindingLayouts(int n) {
@@ -61,15 +58,16 @@ bool testResult(const Eigen::MatrixXf& a, const Eigen::MatrixXf& b, const Eigen:
     static std::random_device rd;
     static std::mt19937 gen(rd());
     constexpr float EPSILON = 0.1f;
+    int matSize = result.cols();
 
-    if (MAT_SIZE <= 1024) {
+    if (matSize <= 1024) {
         Eigen::MatrixXf diff = a * b - result;
         float maxDiff = diff.cwiseAbs().maxCoeff();
         std::println("Max diff: {}", maxDiff);
         return maxDiff < EPSILON;
     }
     else {
-        std::uniform_int_distribution<size_t> dist(0, MAT_SIZE - 1);
+        std::uniform_int_distribution<size_t> dist(0, matSize - 1);
         for (int i = 0; i < ROUNDS; i++) {
             size_t x = dist(gen);
             size_t y = dist(gen);
@@ -85,8 +83,30 @@ bool testResult(const Eigen::MatrixXf& a, const Eigen::MatrixXf& b, const Eigen:
     }
 }
 
-int main() {
-    VulkanContext ctx{};
+auto genData(int matSize) {
+    std::println("Preparing data...");
+    Eigen::MatrixX<Eigen::half> mat1(matSize, matSize);
+    Eigen::MatrixX<Eigen::half> mat2(matSize, matSize);
+    Eigen::MatrixXf mat3(matSize, matSize);
+    mat1.setRandom();
+    mat2.setRandom();
+    mat3.setZero();
+    return std::tuple{std::move(mat1), std::move(mat2), std::move(mat3)};
+}
+
+int run(
+    VulkanContext& ctx,
+    const std::string& spvPath,
+    uint32_t tileSize,
+    uint32_t matSize,
+    Eigen::MatrixX<Eigen::half>& mat1,
+    Eigen::MatrixX<Eigen::half>& mat2,
+    Eigen::MatrixXf& mat3,
+    std::array<uint32_t, 3> numthreads
+
+) {
+    std::println("Running kernel: {}, Matrix size: {}x{}", spvPath, matSize, matSize);
+    int bufSize = matSize * matSize;
     auto bindslayouts = createComputeBindingLayouts(3);
     auto setLayout = ctx.device.createDescriptorSetLayout(
         vk::DescriptorSetLayoutCreateInfo{}
@@ -106,24 +126,24 @@ int main() {
     );
     auto pipeline = createComputePipeline(
         ctx,
-        {layout, readFile("shaders/gemm_coopmat_tiled_opt.spv")},
-        {2, 2, ctx.subgroupSize}
+        {layout, readFile(spvPath)},
+        numthreads
     );
 
     auto matABuf = BufferFactory::createStaticBuffer(
         BufferFactory::Type::Storage,
         *ctx.allocator,
-        BUF_SIZE * sizeof(Eigen::half)
+        bufSize * sizeof(Eigen::half)
     );
     auto matBBuf = BufferFactory::createStaticBuffer(
         BufferFactory::Type::Storage,
         *ctx.allocator,
-        BUF_SIZE * sizeof(Eigen::half)
+        bufSize * sizeof(Eigen::half)
     );
     auto matCBuf = BufferFactory::createStaticBuffer(
         BufferFactory::Type::Storage,
         *ctx.allocator,
-        BUF_SIZE * sizeof(float)
+        bufSize * sizeof(float)
     );
 
     auto sets = ctx.device.allocateDescriptorSets({
@@ -142,27 +162,19 @@ int main() {
         ctx.device
     );
 
-    std::println("Preparing data...");
-    Eigen::MatrixX<Eigen::half> mat1(MAT_SIZE, MAT_SIZE);
-    Eigen::MatrixX<Eigen::half> mat2(MAT_SIZE, MAT_SIZE);
-    Eigen::MatrixXf mat3(MAT_SIZE, MAT_SIZE);
-    mat1.setRandom();
-    mat2.setRandom();
-    mat3.setZero();
-
     std::println("Loading data to VRAM...");
     ctx.loadingCmdBuffer.begin({});
     {
         matABuf->load(
-            std::span((uint8_t*)mat1.data(), BUF_SIZE * sizeof(Eigen::half)),
+            std::span((uint8_t*)mat1.data(), bufSize * sizeof(Eigen::half)),
             ctx.loadingCmdBuffer
         );
         matBBuf->load(
-            std::span((uint8_t*)mat2.data(), BUF_SIZE * sizeof(Eigen::half)),
+            std::span((uint8_t*)mat2.data(), bufSize * sizeof(Eigen::half)),
             ctx.loadingCmdBuffer
         );
         matCBuf->load(
-            std::span((uint8_t*)mat3.data(), BUF_SIZE * sizeof(float)),
+            std::span((uint8_t*)mat3.data(), bufSize * sizeof(float)),
             ctx.loadingCmdBuffer
         );
         ctx.loadingCmdBuffer.end();
@@ -187,7 +199,7 @@ int main() {
 
     std::println("Begin Compute");
     // assert(MAT_SIZE % TILE_SIZE == 0);
-    const uint32_t groupCount = (MAT_SIZE + TILE_SIZE - 1) / TILE_SIZE;
+    const uint32_t groupCount = (matSize + tileSize - 1) / tileSize;
     const auto time1 = getTimestampMs();
 
     for (uint32_t baseGroupY = 0; baseGroupY < groupCount;
@@ -203,7 +215,7 @@ int main() {
             layout,
             vk::ShaderStageFlagBits::eCompute,
             0,
-            vk::ArrayProxy<const uint32_t>{MAT_SIZE, MAT_SIZE, MAT_SIZE}
+            vk::ArrayProxy<const uint32_t>{matSize, matSize, matSize}
         );
         cmd.bindDescriptorSets(
             vk::PipelineBindPoint::eCompute,
@@ -234,7 +246,7 @@ int main() {
     }
     std::println("Time used: {} ms", getTimestampMs() - time1);
     std::println("Compute Done. Reading back result...");
-    Eigen::MatrixXf result = Eigen::MatrixXf(MAT_SIZE, MAT_SIZE);
+    Eigen::MatrixXf result = Eigen::MatrixXf(matSize, matSize);
     matCBuf->readBackSyncDangerous(ctx, (uint8_t*)result.data());
     std::println("Result read back. Begin validation.");
     if (!testResult(mat1.cast<float>(), mat2.cast<float>(), result)) {
@@ -242,6 +254,69 @@ int main() {
         exit(1);
     }
     std::println("Done.");
+
+    return 0;
+}
+
+int main() {
+    constexpr size_t MAT_SIZE = 1 << 14;
+    VulkanContext ctx{};
+    auto [mat1, mat2, mat3] = genData(MAT_SIZE);
+    run(
+        ctx,
+        "shaders/gemm_coopmat.spv",
+        16,
+        MAT_SIZE,
+        mat1,
+        mat2,
+        mat3,
+        {ctx.subgroupSize, 1, 1}
+    );
+    ctx.device.waitIdle();
+    std::this_thread::sleep_for(std::chrono::milliseconds(2000));
+
+    std::println("--------------------------------------");
+    mat3.setZero();
+    run(
+        ctx,
+        "shaders/gemm_coopmat_opt.spv",
+        32,
+        MAT_SIZE,
+        mat1,
+        mat2,
+        mat3,
+        {ctx.subgroupSize, 1, 1}
+    );
+    ctx.device.waitIdle();
+    std::this_thread::sleep_for(std::chrono::milliseconds(2000));
+
+    std::println("--------------------------------------");
+    mat3.setZero();
+    run(
+        ctx,
+        "shaders/gemm_coopmat_tiled.spv",
+        64,
+        MAT_SIZE,
+        mat1,
+        mat2,
+        mat3,
+        {ctx.subgroupSize, 4, 4}
+    );
+    ctx.device.waitIdle();
+    std::this_thread::sleep_for(std::chrono::milliseconds(2000));
+
+    std::println("--------------------------------------");
+    mat3.setZero();
+    run(
+        ctx,
+        "shaders/gemm_coopmat_tiled_opt.spv",
+        64,
+        MAT_SIZE,
+        mat1,
+        mat2,
+        mat3,
+        {ctx.subgroupSize, 2, 2}
+    );
 
     return 0;
 }
