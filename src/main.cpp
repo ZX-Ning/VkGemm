@@ -258,15 +258,18 @@ int run(
     return 0;
 }
 
-int main() {
-    constexpr size_t MAT_SIZE = 1 << 14;
+int main(int argc, char** argv) {
+    size_t matSize = 1 << 14;
+    if (argc == 2) {
+        matSize = std::stoi(argv[1]);
+    }
     VulkanContext ctx{};
-    auto [mat1, mat2, mat3] = genData(MAT_SIZE);
+    auto [mat1, mat2, mat3] = genData(matSize);
     run(
         ctx,
         "shaders/gemm_coopmat.spv",
         16,
-        MAT_SIZE,
+        matSize,
         mat1,
         mat2,
         mat3,
@@ -281,7 +284,7 @@ int main() {
         ctx,
         "shaders/gemm_coopmat_opt.spv",
         32,
-        MAT_SIZE,
+        matSize,
         mat1,
         mat2,
         mat3,
@@ -296,7 +299,7 @@ int main() {
         ctx,
         "shaders/gemm_coopmat_tiled.spv",
         64,
-        MAT_SIZE,
+        matSize,
         mat1,
         mat2,
         mat3,
@@ -311,7 +314,7 @@ int main() {
         ctx,
         "shaders/gemm_coopmat_tiled_opt.spv",
         64,
-        MAT_SIZE,
+        matSize,
         mat1,
         mat2,
         mat3,

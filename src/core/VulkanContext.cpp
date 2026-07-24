@@ -280,6 +280,7 @@ vk::raii::PhysicalDevice pickPhysicalDevice(vk::raii::Instance& instance) {
             features.get<vk::PhysicalDeviceVulkan11Features>().uniformAndStorageBuffer16BitAccess &&
             features.get<vk::PhysicalDeviceVulkan11Features>().shaderDrawParameters &&
             features.get<vk::PhysicalDeviceVulkan12Features>().shaderFloat16 &&
+            features.get<vk::PhysicalDeviceVulkan12Features>().vulkanMemoryModelDeviceScope &&
             features.get<vk::PhysicalDeviceVulkan12Features>().vulkanMemoryModel &&
             features.get<vk::PhysicalDeviceVulkan13Features>().synchronization2 &&
             features.get<vk::PhysicalDeviceVulkan13Features>().dynamicRendering &&
@@ -391,7 +392,8 @@ void VulkanContext::initLogicalDevice() {
         },
         vk::PhysicalDeviceVulkan12Features{
             .shaderFloat16 = true,
-            .vulkanMemoryModel = true
+            .vulkanMemoryModel = true,
+            .vulkanMemoryModelDeviceScope = true
         },
         vk::PhysicalDeviceVulkan13Features{
             .synchronization2 = true,

@@ -35,11 +35,11 @@ ConstantBuffer<Shape> shape;
 // col major
 [[ForceInline]]
 inline half get_A_or_0(uint x, uint y) {
-    return x < shape.M && y < shape.K ? mat_A[y * shape.M + x] : 0.f;
+    return x < shape.M && y < shape.K ? mat_A[y * shape.M + x] : 0.hf;
 }
 [[ForceInline]]
 inline half get_B_or_0(uint x, uint y) {
-    return x < shape.K && y < shape.N ? mat_B[y * shape.K + x] : 0.f;
+    return x < shape.K && y < shape.N ? mat_B[y * shape.K + x] : 0.hf;
 }
 
 [[ForceInline]]

@@ -85,6 +85,8 @@ groupshared float s_c[LARGE_TILE_SIZE * LARGE_TILE_SIZE];
 [[shader("compute")]]
 [[numthreads(NUM_THREADS_X, NUM_THREADS_Y, NUM_THREADS_Z)]]
 void main(uint3 gid: SV_GroupID, uint tidx: SV_GroupIndex) {
+    uint thread_count = NUM_THREADS_X * NUM_THREADS_Y * NUM_THREADS_Z;
+
     uint sg_index = WaveGetWaveIndex();  // assume 0-4
     uint sg_size = WaveGetLaneCount();
     uint2 sgid = uint2(sg_index % SUB_TILES, sg_index / SUB_TILES);
@@ -102,14 +104,13 @@ void main(uint3 gid: SV_GroupID, uint tidx: SV_GroupIndex) {
     var acc10 = MatACC(0.f);
     var acc11 = MatACC(0.f);
 
-    uint move_per_thread = SUB_TILE_SIZE * SUB_TILE_SIZE / sg_size;
-    uint move_start =
-        sg_index * SUB_TILE_SIZE * SUB_TILE_SIZE +
-        WaveGetLaneIndex() * move_per_thread;
+    // uint move_per_thread = SUB_TILE_SIZE * SUB_TILE_SIZE / sg_size;
+    // uint move_start =
+    //     sg_index * SUB_TILE_SIZE * SUB_TILE_SIZE +
+    //     WaveGetLaneIndex() * move_per_thread;
     for (uint t = 0; t < shape.K; t += LARGE_TILE_SIZE) {
         // cooperative load a,b to shared mem
-        for (uint move_i = 0; move_i < move_per_thread; move_i++) {
-            uint move = move_start + move_i;
+        for (uint move = tidx; move < LARGE_TILE_SIZE * LARGE_TILE_SIZE; move += thread_count) {
             uint move_row = move % LARGE_TILE_SIZE;
             uint move_col = move / LARGE_TILE_SIZE;
             s_a[move] = get_a_or_0(row_offset + move_row, t + move_col);
@@ -147,7 +148,7 @@ void main(uint3 gid: SV_GroupID, uint tidx: SV_GroupIndex) {
         }
         GroupMemoryBarrierWithGroupSync();
     }
-  
+
     acc00.Store<COL_MAJ>(
         s_c,
         shared_col_offset * LARGE_TILE_SIZE + shared_row_offset,
@@ -170,8 +171,7 @@ void main(uint3 gid: SV_GroupID, uint tidx: SV_GroupIndex) {
     );
     GroupMemoryBarrierWithGroupSync();
 
-    for (uint move_i = 0; move_i < move_per_thread; move_i++) {
-        uint move = move_start + move_i;
+    for (uint move = tidx; move < LARGE_TILE_SIZE * LARGE_TILE_SIZE; move += thread_count) {
         uint move_row = move % LARGE_TILE_SIZE;
         uint move_col = move / LARGE_TILE_SIZE;
         add_acc_safe(row_offset + move_row, col_offset + move_col, s_c[move]);
