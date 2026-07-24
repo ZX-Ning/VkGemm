@@ -8,13 +8,26 @@ set_warnings("all", "extra")
 --     add_requires("libsdl3", {system = false})
 -- end
 
+option("cuBlas", function () 
+    set_description("Enable cuBLAS for reference")
+    set_default(true)
+    add_defines("CUBLAS") 
+    add_includedirs("/usr/local/cuda/include")
+    add_linkdirs("/usr/local/cuda/lib64")
+    add_links("cublas", "cudart")
+end)
+
+
 add_requires("vulkan-hpp", "vulkan-memory-allocator", "eigen", "openmp")
 
 target("learn_vulkan", function()
     set_kind("binary")
     set_languages("c17", "c++23")
-    add_files("src/**.cpp")
+    add_files("src/*.cpp")
+    add_files("src/core/**.cpp")
+    add_files("src/cuda_ref/*.cpp")
     add_packages("vulkan-hpp", "vulkan-memory-allocator", "eigen", "openmp")
+    add_options("cuBlas")
 
     add_defines("VK_NO_PROTOTYPES")
     add_defines("VULKAN_HPP_NO_CONSTRUCTORS")

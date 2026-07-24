@@ -9,6 +9,10 @@
 //
 #include <Eigen/Dense>
 
+#ifdef CUBLAS
+#include "cuda_ref/cublas.hpp"
+#endif
+
 constexpr uint32_t MAX_GROUP_ROWS_PER_SUBMISSION = 64;
 
 std::vector<vk::DescriptorSetLayoutBinding> createComputeBindingLayouts(int n) {
@@ -53,7 +57,7 @@ void WriteDescriptorSet(
     device.updateDescriptorSets(writes, {});
 }
 
-bool testResult(const Eigen::MatrixXf& a, const Eigen::MatrixXf& b, const Eigen::MatrixXf& result) {
+bool varify(const Eigen::MatrixXf& a, const Eigen::MatrixXf& b, const Eigen::MatrixXf& result) {
     constexpr int ROUNDS = 200;
     static std::random_device rd;
     static std::mt19937 gen(rd());
@@ -81,6 +85,25 @@ bool testResult(const Eigen::MatrixXf& a, const Eigen::MatrixXf& b, const Eigen:
         }
         return true;
     }
+}
+
+void runCpu(
+    Eigen::MatrixX<Eigen::half>& mat1,
+    Eigen::MatrixX<Eigen::half>& mat2,
+    Eigen::MatrixXf& mat3
+) {
+    std::println("Begin CPU compute");
+    size_t time1 = getTimestampMs();
+    mat3 += mat1.cast<float>() * mat2.cast<float>();
+    std::println("CPU compute Done. Time: {} ms", getTimestampMs() - time1);
+}
+
+bool testResult(const Eigen::MatrixXf& result, const Eigen::MatrixXf& expected) {
+    constexpr float EPSILON = 0.1f;
+    Eigen::MatrixXf diff = expected - result;
+    float maxDiff = diff.cwiseAbs().maxCoeff();
+    std::println("Max diff: {}", maxDiff);
+    return maxDiff < EPSILON;
 }
 
 auto genData(int matSize) {
@@ -245,16 +268,10 @@ int run(
         ctx.queue.waitIdle();
     }
     std::println("Time used: {} ms", getTimestampMs() - time1);
-    std::println("Compute Done. Reading back result...");
-    Eigen::MatrixXf result = Eigen::MatrixXf(matSize, matSize);
-    matCBuf->readBackSyncDangerous(ctx, (uint8_t*)result.data());
+    std::println("Compute Done.");
+    mat3.setZero();
+    matCBuf->readBackSyncDangerous(ctx, (uint8_t*)mat3.data());
     std::println("Result read back. Begin validation.");
-    if (!testResult(mat1.cast<float>(), mat2.cast<float>(), result)) {
-        std::println(stderr, "not match!");
-        exit(1);
-    }
-    std::println("Done.");
-
     return 0;
 }
 
@@ -265,6 +282,16 @@ int main(int argc, char** argv) {
     }
     VulkanContext ctx{};
     auto [mat1, mat2, mat3] = genData(matSize);
+    Eigen::MatrixXf mat3_ref(mat3);
+
+#ifdef CUBLAS
+    runCuBlas(matSize, mat1, mat2, mat3_ref);
+    #else
+    runCpu(mat1, mat2, mat3_ref);
+#endif
+
+    std::this_thread::sleep_for(std::chrono::milliseconds(2000));
+    std::println("--------------------------------------");
     run(
         ctx,
         "shaders/gemm_coopmat.spv",
@@ -276,6 +303,11 @@ int main(int argc, char** argv) {
         {ctx.subgroupSize, 1, 1}
     );
     ctx.device.waitIdle();
+    if (!testResult(mat3, mat3_ref)) {
+        std::println(stderr, "not match!");
+        exit(1);
+    }
+    std::println("Test Pass. Done.");
     std::this_thread::sleep_for(std::chrono::milliseconds(2000));
 
     std::println("--------------------------------------");
@@ -291,6 +323,11 @@ int main(int argc, char** argv) {
         {ctx.subgroupSize, 1, 1}
     );
     ctx.device.waitIdle();
+    if (!testResult(mat3, mat3_ref)) {
+        std::println(stderr, "not match!");
+        exit(1);
+    }
+    std::println("Test Pass. Done.");
     std::this_thread::sleep_for(std::chrono::milliseconds(2000));
 
     std::println("--------------------------------------");
@@ -306,6 +343,11 @@ int main(int argc, char** argv) {
         {ctx.subgroupSize, 4, 4}
     );
     ctx.device.waitIdle();
+    if (!testResult(mat3, mat3_ref)) {
+        std::println(stderr, "not match!");
+        exit(1);
+    }
+    std::println("Test Pass. Done.");
     std::this_thread::sleep_for(std::chrono::milliseconds(2000));
 
     std::println("--------------------------------------");
@@ -320,6 +362,11 @@ int main(int argc, char** argv) {
         mat3,
         {ctx.subgroupSize, 2, 2}
     );
+    if (!testResult(mat3, mat3_ref)) {
+        std::println(stderr, "not match!");
+        exit(1);
+    }
+    std::println("Test Pass. Done.");
 
     return 0;
 }
