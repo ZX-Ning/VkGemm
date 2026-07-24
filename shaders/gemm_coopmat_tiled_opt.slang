@@ -1,6 +1,8 @@
-#define SUB_TILE_SIZE   16
-#define SUB_TILES       4
+#define COOP_TILE_SIZE  16
+#define COOP_TILES      4
 #define LARGE_TILE_SIZE 64
+constexpr static int SUB_TILES = (COOP_TILES / 2);
+constexpr static int SUB_TILE_SIZE = COOP_TILE_SIZE * 2;
 // #define SUBGROUP_SIZE 32
 
 [vk::constant_id(0)]
@@ -37,20 +39,20 @@ ConstantBuffer<Shape> shape;
 typealias MatA = linalg::CoopMat<
     half,
     MemoryScope.Subgroup,
-    SUB_TILE_SIZE,
-    SUB_TILE_SIZE,
+    COOP_TILE_SIZE,
+    COOP_TILE_SIZE,
     linalg::CoopMatMatrixUse.MatrixA>;
 typealias MatB = linalg::CoopMat<
     half,
     MemoryScope.Subgroup,
-    SUB_TILE_SIZE,
-    SUB_TILE_SIZE,
+    COOP_TILE_SIZE,
+    COOP_TILE_SIZE,
     linalg::CoopMatMatrixUse.MatrixB>;
 typealias MatACC = linalg::CoopMat<
     float,
     MemoryScope.Subgroup,
-    SUB_TILE_SIZE,
-    SUB_TILE_SIZE,
+    COOP_TILE_SIZE,
+    COOP_TILE_SIZE,
     linalg::CoopMatMatrixUse.MatrixAccumulator>;
 
 const static let COL_MAJ = linalg::CoopMatMatrixLayout::ColumnMajor;
@@ -77,12 +79,13 @@ groupshared half s_b[LARGE_TILE_SIZE * LARGE_TILE_SIZE];
 groupshared float s_c[LARGE_TILE_SIZE * LARGE_TILE_SIZE];
 
 /**
- * Assume numthreads(SUB_TILES, SUB_TILES, SUBGROUPSIZE)
+ * Assume numthreads = (COOP_TILES / 2)^2 * SUBGROUPSIZE
+ * 4 * 32 on nvidia
  */
 [[shader("compute")]]
 [[numthreads(NUM_THREADS_X, NUM_THREADS_Y, NUM_THREADS_Z)]]
-void main(uint3 gid: SV_GroupID) {
-    uint sg_index = WaveGetWaveIndex();  // assume 0-15
+void main(uint3 gid: SV_GroupID, uint tidx: SV_GroupIndex) {
+    uint sg_index = WaveGetWaveIndex();  // assume 0-4
     uint sg_size = WaveGetLaneCount();
     uint2 sgid = uint2(sg_index % SUB_TILES, sg_index / SUB_TILES);
 
@@ -92,8 +95,13 @@ void main(uint3 gid: SV_GroupID) {
     uint shared_row_offset = sgid.x * SUB_TILE_SIZE;
     uint shared_col_offset = sgid.y * SUB_TILE_SIZE;
 
-    var acc = MatACC(0.f);
-    
+    // A subgroup work on SUB_TILE_SIZE x SUB_TILE_SIZE matrix
+    // which is 2x2 coopmat
+    var acc00 = MatACC(0.f);
+    var acc01 = MatACC(0.f);
+    var acc10 = MatACC(0.f);
+    var acc11 = MatACC(0.f);
+
     uint move_per_thread = SUB_TILE_SIZE * SUB_TILE_SIZE / sg_size;
     uint move_start =
         sg_index * SUB_TILE_SIZE * SUB_TILE_SIZE +
@@ -111,19 +119,57 @@ void main(uint3 gid: SV_GroupID) {
         GroupMemoryBarrierWithGroupSync();
 
         [[ForceUnroll]]  // loop 4 times
-        for (uint sub_t = 0; sub_t < LARGE_TILE_SIZE; sub_t += SUB_TILE_SIZE) {
-            MatA a = MatA.Load<COL_MAJ>(s_a, shared_row_offset + sub_t * LARGE_TILE_SIZE, LARGE_TILE_SIZE);
-            MatB b = MatB.Load<COL_MAJ>(s_b, sub_t + shared_col_offset * LARGE_TILE_SIZE, LARGE_TILE_SIZE);
-            acc = linalg::coopMatMulAdd<float, false>(a, b, acc);
+        for (uint sub_t = 0; sub_t < LARGE_TILE_SIZE; sub_t += COOP_TILE_SIZE) {
+            var a0 = MatA.Load<COL_MAJ>(
+                s_a,
+                shared_row_offset + sub_t * LARGE_TILE_SIZE,
+                LARGE_TILE_SIZE
+            );
+            var a1 = MatA.Load<COL_MAJ>(
+                s_a,
+                (shared_row_offset + COOP_TILE_SIZE) + sub_t * LARGE_TILE_SIZE,
+                LARGE_TILE_SIZE
+            );
+            var b0 = MatB.Load<COL_MAJ>(
+                s_b,
+                sub_t + shared_col_offset * LARGE_TILE_SIZE,
+                LARGE_TILE_SIZE
+            );
+            var b1 = MatB.Load<COL_MAJ>(
+                s_b,
+                sub_t + (shared_col_offset + COOP_TILE_SIZE) * LARGE_TILE_SIZE,
+                LARGE_TILE_SIZE
+            );
+            acc00 = linalg::coopMatMulAdd<float, false>(a0, b0, acc00);
+            acc01 = linalg::coopMatMulAdd<float, false>(a1, b0, acc01);
+            acc10 = linalg::coopMatMulAdd<float, false>(a0, b1, acc10);
+            acc11 = linalg::coopMatMulAdd<float, false>(a1, b1, acc11);
         }
         GroupMemoryBarrierWithGroupSync();
     }
-    // uint acc_row = row_offset + sgid.x * SUB_TILE_SIZE;
-    // uint acc_col = col_offset + sgid.y * SUB_TILE_SIZE;
-    // acc.Store<COL_MAJ>(mat_acc, acc_row + acc_col * shape.M, shape.M);
-    
-    acc.Store<COL_MAJ>(s_c, shared_row_offset + shared_col_offset * LARGE_TILE_SIZE, LARGE_TILE_SIZE);
+  
+    acc00.Store<COL_MAJ>(
+        s_c,
+        shared_col_offset * LARGE_TILE_SIZE + shared_row_offset,
+        LARGE_TILE_SIZE
+    );
+    acc01.Store<COL_MAJ>(
+        s_c,
+        shared_col_offset * LARGE_TILE_SIZE + (shared_row_offset + COOP_TILE_SIZE),
+        LARGE_TILE_SIZE
+    );
+    acc10.Store<COL_MAJ>(
+        s_c,
+        (shared_col_offset + COOP_TILE_SIZE) * LARGE_TILE_SIZE + shared_row_offset,
+        LARGE_TILE_SIZE
+    );
+    acc11.Store<COL_MAJ>(
+        s_c,
+        (shared_col_offset + COOP_TILE_SIZE) * LARGE_TILE_SIZE + (shared_row_offset + COOP_TILE_SIZE),
+        LARGE_TILE_SIZE
+    );
     GroupMemoryBarrierWithGroupSync();
+
     for (uint move_i = 0; move_i < move_per_thread; move_i++) {
         uint move = move_start + move_i;
         uint move_row = move % LARGE_TILE_SIZE;
@@ -131,3 +177,5 @@ void main(uint3 gid: SV_GroupID) {
         add_acc_safe(row_offset + move_row, col_offset + move_col, s_c[move]);
     }
 }
+
+

@@ -106,8 +106,8 @@ int main() {
     );
     auto pipeline = createComputePipeline(
         ctx,
-        {layout, readFile("shaders/gemm_coopmat_tiled.spv")},
-        {4, 4, ctx.subgroupSize}
+        {layout, readFile("shaders/gemm_coopmat_tiled_opt.spv")},
+        {2, 2, ctx.subgroupSize}
     );
 
     auto matABuf = BufferFactory::createStaticBuffer(
@@ -186,7 +186,7 @@ int main() {
     auto& cmd = cmdBufs[0];
 
     std::println("Begin Compute");
-    assert(MAT_SIZE % TILE_SIZE == 0);
+    // assert(MAT_SIZE % TILE_SIZE == 0);
     const uint32_t groupCount = (MAT_SIZE + TILE_SIZE - 1) / TILE_SIZE;
     const auto time1 = getTimestampMs();
 
