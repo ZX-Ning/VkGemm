@@ -102,7 +102,7 @@ bool testResult(const Eigen::MatrixXf& result, const Eigen::MatrixXf& expected) 
     constexpr float EPSILON = 0.1f;
     Eigen::MatrixXf diff = expected - result;
     float maxDiff = diff.cwiseAbs().maxCoeff();
-    std::println("Max diff: {}", maxDiff);
+    // std::println("Max diff: {}", maxDiff);
     return maxDiff < EPSILON;
 }
 
@@ -267,8 +267,7 @@ int run(
         ctx.queue.submit(submitInfo, nullptr);
         ctx.queue.waitIdle();
     }
-    std::println("Time used: {} ms", getTimestampMs() - time1);
-    std::println("Compute Done.");
+    std::println("Compute Done. Time used: {} ms", getTimestampMs() - time1);
     mat3.setZero();
     matCBuf->readBackSyncDangerous(ctx, (uint8_t*)mat3.data());
     std::println("Result read back. Begin validation.");
@@ -283,15 +282,36 @@ int main(int argc, char** argv) {
     VulkanContext ctx{};
     auto [mat1, mat2, mat3] = genData(matSize);
     Eigen::MatrixXf mat3_ref(mat3);
-
+    std::println("--------------------------------------");
 #ifdef CUBLAS
     runCuBlas(matSize, mat1, mat2, mat3_ref);
-    #else
+#else
     runCpu(mat1, mat2, mat3_ref);
 #endif
-
     std::this_thread::sleep_for(std::chrono::milliseconds(2000));
+
     std::println("--------------------------------------");
+    mat3.setZero();
+    run(
+        ctx,
+        "shaders/gemm.spv",
+        32,
+        matSize,
+        mat1,
+        mat2,
+        mat3,
+        {32, 32, 1}
+    );
+    ctx.device.waitIdle();
+    if (!testResult(mat3, mat3_ref)) {
+        std::println(stderr, "not match!");
+        exit(1);
+    }
+    std::println("Test Pass. Done.");
+    std::this_thread::sleep_for(std::chrono::milliseconds(2000));
+
+    std::println("--------------------------------------");
+    mat3.setZero();
     run(
         ctx,
         "shaders/gemm_coopmat.spv",
@@ -355,6 +375,24 @@ int main(int argc, char** argv) {
     run(
         ctx,
         "shaders/gemm_coopmat_tiled_opt.spv",
+        64,
+        matSize,
+        mat1,
+        mat2,
+        mat3,
+        {ctx.subgroupSize, 2, 2}
+    );
+    if (!testResult(mat3, mat3_ref)) {
+        std::println(stderr, "not match!");
+        exit(1);
+    }
+    std::this_thread::sleep_for(std::chrono::milliseconds(2000));
+
+    std::println("--------------------------------------");
+    mat3.setZero();
+    run(
+        ctx,
+        "shaders/gemm_coopmat_tiled_opt2.spv",
         64,
         matSize,
         mat1,

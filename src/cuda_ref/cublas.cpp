@@ -47,7 +47,7 @@ void runCuBlas(
     CUDA_CHECK(cudaMalloc(&d_B, bufSize * 2));
     CUDA_CHECK(cudaMalloc(&d_C, bufSize * 4));
 
-    std::println("Begin cuBlas Compute");
+    std::println("Begin cuBlas Compute. Matrix size: {}x{}", matSize, matSize);
 
     CUDA_CHECK(cudaMemcpy(
         d_A,

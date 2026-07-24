@@ -1,4 +1,4 @@
-#define TILE_SIZE 16
+#define TILE_SIZE 32
 
 [vk::constant_id(0)]
 const uint NUM_THREADS_X;
