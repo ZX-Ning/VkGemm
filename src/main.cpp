@@ -57,35 +57,35 @@ void WriteDescriptorSet(
     device.updateDescriptorSets(writes, {});
 }
 
-bool varify(const Eigen::MatrixXf& a, const Eigen::MatrixXf& b, const Eigen::MatrixXf& result) {
-    constexpr int ROUNDS = 200;
-    static std::random_device rd;
-    static std::mt19937 gen(rd());
-    constexpr float EPSILON = 0.1f;
-    int matSize = result.cols();
+// bool varify(const Eigen::MatrixXf& a, const Eigen::MatrixXf& b, const Eigen::MatrixXf& result) {
+//     constexpr int ROUNDS = 200;
+//     static std::random_device rd;
+//     static std::mt19937 gen(rd());
+//     constexpr float EPSILON = 0.1f;
+//     int matSize = result.cols();
 
-    if (matSize <= 1024) {
-        Eigen::MatrixXf diff = a * b - result;
-        float maxDiff = diff.cwiseAbs().maxCoeff();
-        std::println("Max diff: {}", maxDiff);
-        return maxDiff < EPSILON;
-    }
-    else {
-        std::uniform_int_distribution<size_t> dist(0, matSize - 1);
-        for (int i = 0; i < ROUNDS; i++) {
-            size_t x = dist(gen);
-            size_t y = dist(gen);
-            auto left = a.row(x);
-            auto right = b.col(y);
-            float expected = left * right;
-            float actual = result(x, y);
-            if (std::abs(expected - actual) > EPSILON) {
-                return false;
-            }
-        }
-        return true;
-    }
-}
+//     if (matSize <= 1024) {
+//         Eigen::MatrixXf diff = a * b - result;
+//         float maxDiff = diff.cwiseAbs().maxCoeff();
+//         std::println("Max diff: {}", maxDiff);
+//         return maxDiff < EPSILON;
+//     }
+//     else {
+//         std::uniform_int_distribution<size_t> dist(0, matSize - 1);
+//         for (int i = 0; i < ROUNDS; i++) {
+//             size_t x = dist(gen);
+//             size_t y = dist(gen);
+//             auto left = a.row(x);
+//             auto right = b.col(y);
+//             float expected = left * right;
+//             float actual = result(x, y);
+//             if (std::abs(expected - actual) > EPSILON) {
+//                 return false;
+//             }
+//         }
+//         return true;
+//     }
+// }
 
 void runCpu(
     Eigen::MatrixX<Eigen::half>& mat1,
@@ -113,7 +113,7 @@ auto genData(int matSize) {
     Eigen::MatrixXf mat3(matSize, matSize);
     mat1.setRandom();
     mat2.setRandom();
-    mat3.setZero();
+    mat3.setRandom();
     return std::tuple{std::move(mat1), std::move(mat2), std::move(mat3)};
 }
 
@@ -268,30 +268,70 @@ int run(
         ctx.queue.waitIdle();
     }
     std::println("Compute Done. Time used: {} ms", getTimestampMs() - time1);
-    mat3.setZero();
     matCBuf->readBackSyncDangerous(ctx, (uint8_t*)mat3.data());
     std::println("Result read back. Begin validation.");
     return 0;
 }
 
 int main(int argc, char** argv) {
+    constexpr int WAIT_TIME = 5000;
     size_t matSize = 1 << 14;
     if (argc == 2) {
         matSize = std::stoi(argv[1]);
     }
     VulkanContext ctx{};
     auto [mat1, mat2, mat3] = genData(matSize);
-    Eigen::MatrixXf mat3_ref(mat3);
+    Eigen::MatrixXf originMat3(mat3);
+    Eigen::MatrixXf resultRef(mat3);
     std::println("--------------------------------------");
 #ifdef CUBLAS
-    runCuBlas(matSize, mat1, mat2, mat3_ref);
+    runCuBlas(matSize, mat1, mat2, resultRef);
 #else
     runCpu(mat1, mat2, mat3_ref);
 #endif
-    std::this_thread::sleep_for(std::chrono::milliseconds(2000));
+    std::this_thread::sleep_for(std::chrono::milliseconds(WAIT_TIME));
 
     std::println("--------------------------------------");
-    mat3.setZero();
+    mat3 = originMat3;
+    assert(ctx.subgroupSize == 32);
+    run(
+        ctx,
+        "shaders/gemm_coopmat_tiled_opt3.spv",
+        64,
+        matSize,
+        mat1,
+        mat2,
+        mat3,
+        {32, 4, 2}
+    );
+    if (!testResult(mat3, resultRef)) {
+        std::println(stderr, "not match!");
+        exit(1);
+    }
+    std::this_thread::sleep_for(std::chrono::milliseconds(WAIT_TIME));
+
+    std::println("--------------------------------------");
+    mat3 = originMat3;
+    assert(ctx.subgroupSize == 32);
+    run(
+        ctx,
+        "shaders/gemm_coopmat_tiled_opt4.spv",
+        64,
+        matSize,
+        mat1,
+        mat2,
+        mat3,
+        {32, 4, 2}
+    );
+    if (!testResult(mat3, resultRef)) {
+        std::println(stderr, "not match!");
+        exit(1);
+    }
+
+    std::this_thread::sleep_for(std::chrono::milliseconds(WAIT_TIME));
+
+    std::println("--------------------------------------");
+    mat3 = originMat3;
     run(
         ctx,
         "shaders/gemm.spv",
@@ -303,15 +343,15 @@ int main(int argc, char** argv) {
         {32, 32, 1}
     );
     ctx.device.waitIdle();
-    if (!testResult(mat3, mat3_ref)) {
+    if (!testResult(mat3, resultRef)) {
         std::println(stderr, "not match!");
         exit(1);
     }
     std::println("Test Pass. Done.");
-    std::this_thread::sleep_for(std::chrono::milliseconds(2000));
+    std::this_thread::sleep_for(std::chrono::milliseconds(WAIT_TIME));
 
     std::println("--------------------------------------");
-    mat3.setZero();
+    mat3 = originMat3;
     run(
         ctx,
         "shaders/gemm_coopmat.spv",
@@ -323,15 +363,15 @@ int main(int argc, char** argv) {
         {ctx.subgroupSize, 1, 1}
     );
     ctx.device.waitIdle();
-    if (!testResult(mat3, mat3_ref)) {
+    if (!testResult(mat3, resultRef)) {
         std::println(stderr, "not match!");
         exit(1);
     }
     std::println("Test Pass. Done.");
-    std::this_thread::sleep_for(std::chrono::milliseconds(2000));
+    std::this_thread::sleep_for(std::chrono::milliseconds(WAIT_TIME));
 
     std::println("--------------------------------------");
-    mat3.setZero();
+    mat3 = originMat3;
     run(
         ctx,
         "shaders/gemm_coopmat_opt.spv",
@@ -343,15 +383,15 @@ int main(int argc, char** argv) {
         {ctx.subgroupSize, 1, 1}
     );
     ctx.device.waitIdle();
-    if (!testResult(mat3, mat3_ref)) {
+    if (!testResult(mat3, resultRef)) {
         std::println(stderr, "not match!");
         exit(1);
     }
     std::println("Test Pass. Done.");
-    std::this_thread::sleep_for(std::chrono::milliseconds(2000));
+    std::this_thread::sleep_for(std::chrono::milliseconds(WAIT_TIME));
 
     std::println("--------------------------------------");
-    mat3.setZero();
+    mat3 = originMat3;
     run(
         ctx,
         "shaders/gemm_coopmat_tiled.spv",
@@ -363,15 +403,15 @@ int main(int argc, char** argv) {
         {ctx.subgroupSize, 4, 4}
     );
     ctx.device.waitIdle();
-    if (!testResult(mat3, mat3_ref)) {
+    if (!testResult(mat3, resultRef)) {
         std::println(stderr, "not match!");
         exit(1);
     }
     std::println("Test Pass. Done.");
-    std::this_thread::sleep_for(std::chrono::milliseconds(2000));
+    std::this_thread::sleep_for(std::chrono::milliseconds(WAIT_TIME));
 
     std::println("--------------------------------------");
-    mat3.setZero();
+    mat3 = originMat3;
     run(
         ctx,
         "shaders/gemm_coopmat_tiled_opt.spv",
@@ -382,14 +422,14 @@ int main(int argc, char** argv) {
         mat3,
         {ctx.subgroupSize, 2, 2}
     );
-    if (!testResult(mat3, mat3_ref)) {
+    if (!testResult(mat3, resultRef)) {
         std::println(stderr, "not match!");
         exit(1);
     }
-    std::this_thread::sleep_for(std::chrono::milliseconds(2000));
+    std::this_thread::sleep_for(std::chrono::milliseconds(WAIT_TIME));
 
     std::println("--------------------------------------");
-    mat3.setZero();
+    mat3 = originMat3;
     run(
         ctx,
         "shaders/gemm_coopmat_tiled_opt2.spv",
@@ -398,12 +438,13 @@ int main(int argc, char** argv) {
         mat1,
         mat2,
         mat3,
-        {ctx.subgroupSize, 2, 2}
+        {ctx.subgroupSize, 4, 2}
     );
-    if (!testResult(mat3, mat3_ref)) {
+    if (!testResult(mat3, resultRef)) {
         std::println(stderr, "not match!");
         exit(1);
     }
+
     std::println("Test Pass. Done.");
 
     return 0;

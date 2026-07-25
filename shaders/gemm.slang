@@ -43,9 +43,9 @@ inline half get_B_or_0(uint x, uint y) {
 }
 
 [[ForceInline]]
-inline void set_C_safe(uint x, uint y, float value) {
+inline void add_C_safe(uint x, uint y, float value) {
     if (x < shape.M && y < shape.N)
-        mat_C[y * shape.M + x] = value;
+        mat_C[y * shape.M + x] += value;
 }
 
 groupshared half As[TILE_SIZE][TILE_SIZE + 1];
@@ -75,6 +75,6 @@ void main(uint3 gid: SV_GroupID, uint3 tid: SV_GroupThreadID) {
         GroupMemoryBarrierWithGroupSync();
     }
     uint cx = offset_x + tid.x, cy = offset_y + tid.y;
-    set_C_safe(cx, cy, acc);
+    add_C_safe(cx, cy, acc);
 }
 
