@@ -7,7 +7,7 @@
 
 #include <cstdlib>
 #include <iostream>
-#include <print>
+#include <fmt/format.h>
 
 #include "../utils.hpp"
 
@@ -47,7 +47,7 @@ void runCuBlas(
     CUDA_CHECK(cudaMalloc(&d_B, bufSize * 2));
     CUDA_CHECK(cudaMalloc(&d_C, bufSize * 4));
 
-    std::println("Begin cuBlas Compute. Matrix size: {}x{}", matSize, matSize);
+    fmt::println("Begin cuBlas Compute. Matrix size: {}x{}", matSize, matSize);
 
     CUDA_CHECK(cudaMemcpy(
         d_A,
@@ -110,7 +110,7 @@ void runCuBlas(
     ));
 
     CUDA_CHECK(cudaDeviceSynchronize());
-    std::println("cuBlas Compute Done. Time: {} ms", getTimestampMs() - time1);
+    fmt::println("cuBlas Compute Done. Time: {} ms", getTimestampMs() - time1);
 
     CUDA_CHECK(cudaMemcpy(
         mat3.data(),

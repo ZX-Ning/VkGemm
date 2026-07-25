@@ -1,6 +1,8 @@
 #define VMA_DEBUG_INITIALIZE_ALLOCATIONS 1
 #include "Buffer.hpp"
 
+#include <fmt/format.h>
+
 LoadedBuffer::LoadedBuffer(
     const vk::BufferCreateInfo& info,
     const VmaAllocationCreateInfo& allocInfo,
@@ -17,7 +19,7 @@ LoadedBuffer::LoadedBuffer(
     );
     if (result != VK_SUCCESS) {
         throw std::runtime_error(
-            std::format("Can not create buffer: {}", static_cast<int>(result))
+            fmt::format("Can not create buffer: {}", static_cast<int>(result))
         );
     }
     resultInfo.size = info.size;

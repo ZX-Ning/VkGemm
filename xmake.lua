@@ -18,7 +18,7 @@ option("cuBlas", function ()
 end)
 
 
-add_requires("vulkan-hpp", "vulkan-memory-allocator", "eigen", "openmp")
+add_requires("vulkan-hpp", "vulkan-memory-allocator", "eigen", "openmp", "fmt")
 
 target("learn_vulkan", function()
     set_kind("binary")
@@ -26,7 +26,7 @@ target("learn_vulkan", function()
     add_files("src/*.cpp")
     add_files("src/core/**.cpp")
     add_files("src/cuda_ref/*.cpp")
-    add_packages("vulkan-hpp", "vulkan-memory-allocator", "eigen", "openmp")
+    add_packages("vulkan-hpp", "vulkan-memory-allocator", "eigen", "openmp", "fmt")
     add_options("cuBlas")
 
     add_defines("VK_NO_PROTOTYPES")

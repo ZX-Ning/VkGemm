@@ -5,8 +5,8 @@
 #include <vk_mem_alloc.h>
 
 #include <cassert>
-#include <format>
-#include <print>
+
+#include <fmt/format.h>
 #include <stdexcept>
 
 // vulkan
@@ -60,7 +60,7 @@ std::vector<const char*> getRequiredExtensions() {
     //     SDL_Vulkan_GetInstanceExtensions(&sdlExtensionCount);
     // if (!sdlExtensions) {
     //     throw std::runtime_error(
-    //         std::format("failed to get SDL Vulkan instance extensions: {}", SDL_GetError())
+    //         fmt::format("failed to get SDL Vulkan instance extensions: {}", SDL_GetError())
     //     );
     // }
 
@@ -86,7 +86,7 @@ std::vector<const char*> getRequiredExtensions() {
 //         if ((format.format == vk::Format::eB8G8R8A8Unorm ||
 //              format.format == vk::Format::eR8G8B8A8Unorm) &&
 //             format.colorSpace == vk::ColorSpaceKHR::eSrgbNonlinear) {
-//             std::println("Can not found Srgb Format, using Unorm.");
+//             fmt::println("Can not found Srgb Format, using Unorm.");
 //             return format;
 //         }
 //     }
@@ -106,11 +106,11 @@ vk::raii::Instance createInstance(const vk::raii::Context& context) {
     // Get the required layers
     std::vector<char const*> requiredLayers;
     if (ENABLE_VALIDATION_LAYERS) {
-        std::println("Enable validation layers.");
+        fmt::println("Enable validation layers.");
         requiredLayers.assign(validationLayers.begin(), validationLayers.end());
     }
     else {
-        std::println("Release mode. Disable validation layers.");
+        fmt::println("Release mode. Disable validation layers.");
     }
 
     // Check if the required layers are supported by the Vulkan implementation.
@@ -126,7 +126,7 @@ vk::raii::Instance createInstance(const vk::raii::Context& context) {
 
         if (!layerFound) {
             throw std::runtime_error(
-                std::format("Required layer not supported: {}", std::string(requiredLayer))
+                fmt::format("Required layer not supported: {}", std::string(requiredLayer))
             );
         }
     }
@@ -149,7 +149,7 @@ vk::raii::Instance createInstance(const vk::raii::Context& context) {
 
         if (!extensionFound) {
             throw std::runtime_error(
-                std::format("Required extension not supported: {}", requiredExtension)
+                fmt::format("Required extension not supported: {}", requiredExtension)
             );
         }
     }
@@ -191,7 +191,7 @@ vk::raii::DebugUtilsMessengerEXT setupDebugMessenger(const vk::raii::Instance& i
             ) -> vk::Bool32 {
             if (severity == vk::DebugUtilsMessageSeverityFlagBitsEXT::eError ||
                 severity == vk::DebugUtilsMessageSeverityFlagBitsEXT::eWarning) {
-                std::println(
+                fmt::println(
                     "[{}] {}, {}",
                     vk::to_string(severity),
                     vk::to_string(type),
@@ -217,7 +217,7 @@ vk::raii::PhysicalDevice pickPhysicalDevice(vk::raii::Instance& instance) {
     //     uint32_t subgroupSize = props.get<vk::PhysicalDeviceSubgroupProperties>().subgroupSize;
     //     auto subgroupctrlProps = props.get<vk::PhysicalDeviceSubgroupSizeControlProperties>();
     //     auto props2 = props.get<vk::PhysicalDeviceProperties2>().properties;
-    //     std::println(
+    //     fmt::println(
     //         "Device {}: {}, default subgroupSize={} (min={}, max={})",
     //         i,
     //         props2.deviceName.data(),
@@ -293,7 +293,7 @@ vk::raii::PhysicalDevice pickPhysicalDevice(vk::raii::Instance& instance) {
             devicesFiltered.push_back(device);
         }
     }
-    std::println("Support device count: {}", devicesFiltered.size());
+    fmt::println("Support device count: {}", devicesFiltered.size());
     for (vk::raii::PhysicalDevice& device : devicesFiltered) {
         auto props = device.getProperties();
         if (props.deviceType == vk::PhysicalDeviceType::eDiscreteGpu) {
@@ -328,7 +328,7 @@ vk::raii::DescriptorPool createDescriptorPool(
 }  // namespace
 
 VulkanContext::VulkanContext() {
-    std::println("Starting Vulkan instance.");
+    fmt::println("Starting Vulkan instance.");
 
     this->instance = createInstance(context);
     this->debugMessenger = setupDebugMessenger(instance);
@@ -339,7 +339,7 @@ VulkanContext::VulkanContext() {
         vk::PhysicalDeviceSubgroupProperties>();
     auto props2 = propsChain.get<vk::PhysicalDeviceProperties2>();
     this->subgroupSize = propsChain.get<vk::PhysicalDeviceSubgroupProperties>().subgroupSize;
-    std::println("Device: {}, subgroupSize={}", props2.properties.deviceName.data(), this->subgroupSize);
+    fmt::println("Device: {}, subgroupSize={}", props2.properties.deviceName.data(), this->subgroupSize);
 
     initLogicalDevice();
     initVmaAllocator();
@@ -360,7 +360,7 @@ VulkanContext::VulkanContext() {
 }
 
 VulkanContext::~VulkanContext() {
-    std::println("Cleaning up Vulkan instance.");
+    fmt::println("Cleaning up Vulkan instance.");
 };
 
 void VulkanContext::initLogicalDevice() {

@@ -1,5 +1,5 @@
 #include <algorithm>
-#include <print>
+#include <fmt/format.h>
 #include <random>
 
 #include "core/Buffer.hpp"
@@ -67,7 +67,7 @@ void WriteDescriptorSet(
 //     if (matSize <= 1024) {
 //         Eigen::MatrixXf diff = a * b - result;
 //         float maxDiff = diff.cwiseAbs().maxCoeff();
-//         std::println("Max diff: {}", maxDiff);
+//         fmt::println("Max diff: {}", maxDiff);
 //         return maxDiff < EPSILON;
 //     }
 //     else {
@@ -92,22 +92,22 @@ void runCpu(
     Eigen::MatrixX<Eigen::half>& mat2,
     Eigen::MatrixXf& mat3
 ) {
-    std::println("Begin CPU compute");
+    fmt::println("Begin CPU compute");
     size_t time1 = getTimestampMs();
     mat3 += mat1.cast<float>() * mat2.cast<float>();
-    std::println("CPU compute Done. Time: {} ms", getTimestampMs() - time1);
+    fmt::println("CPU compute Done. Time: {} ms", getTimestampMs() - time1);
 }
 
 bool testResult(const Eigen::MatrixXf& result, const Eigen::MatrixXf& expected) {
     constexpr float EPSILON = 0.1f;
     Eigen::MatrixXf diff = expected - result;
     float maxDiff = diff.cwiseAbs().maxCoeff();
-    // std::println("Max diff: {}", maxDiff);
+    // fmt::println("Max diff: {}", maxDiff);
     return maxDiff < EPSILON;
 }
 
 auto genData(int matSize) {
-    std::println("Preparing data...");
+    fmt::println("Preparing data...");
     Eigen::MatrixX<Eigen::half> mat1(matSize, matSize);
     Eigen::MatrixX<Eigen::half> mat2(matSize, matSize);
     Eigen::MatrixXf mat3(matSize, matSize);
@@ -128,7 +128,7 @@ int run(
     std::array<uint32_t, 3> numthreads
 
 ) {
-    std::println("Running kernel: {}, Matrix size: {}x{}", spvPath, matSize, matSize);
+    fmt::println("Running kernel: {}, Matrix size: {}x{}", spvPath, matSize, matSize);
     int bufSize = matSize * matSize;
     auto bindslayouts = createComputeBindingLayouts(3);
     auto setLayout = ctx.device.createDescriptorSetLayout(
@@ -185,7 +185,7 @@ int run(
         ctx.device
     );
 
-    std::println("Loading data to VRAM...");
+    fmt::println("Loading data to VRAM...");
     ctx.loadingCmdBuffer.begin({});
     {
         matABuf->load(
@@ -220,7 +220,7 @@ int run(
     assert(cmdBufs.size() == 1);
     auto& cmd = cmdBufs[0];
 
-    std::println("Begin Compute");
+    fmt::println("Begin Compute");
     // assert(MAT_SIZE % TILE_SIZE == 0);
     const uint32_t groupCount = (matSize + tileSize - 1) / tileSize;
     const auto time1 = getTimestampMs();
@@ -267,9 +267,9 @@ int run(
         ctx.queue.submit(submitInfo, nullptr);
         ctx.queue.waitIdle();
     }
-    std::println("Compute Done. Time used: {} ms", getTimestampMs() - time1);
+    fmt::println("Compute Done. Time used: {} ms", getTimestampMs() - time1);
     matCBuf->readBackSyncDangerous(ctx, (uint8_t*)mat3.data());
-    std::println("Result read back. Begin validation.");
+    fmt::println("Result read back. Begin validation.");
     return 0;
 }
 
@@ -283,7 +283,7 @@ int main(int argc, char** argv) {
     auto [mat1, mat2, mat3] = genData(matSize);
     Eigen::MatrixXf originMat3(mat3);
     Eigen::MatrixXf resultRef(mat3);
-    std::println("--------------------------------------");
+    fmt::println("--------------------------------------");
 #ifdef CUBLAS
     runCuBlas(matSize, mat1, mat2, resultRef);
 #else
@@ -291,7 +291,7 @@ int main(int argc, char** argv) {
 #endif
     std::this_thread::sleep_for(std::chrono::milliseconds(WAIT_TIME));
 
-    std::println("--------------------------------------");
+    fmt::println("--------------------------------------");
     mat3 = originMat3;
     assert(ctx.subgroupSize == 32);
     run(
@@ -305,12 +305,12 @@ int main(int argc, char** argv) {
         {32, 4, 2}
     );
     if (!testResult(mat3, resultRef)) {
-        std::println(stderr, "not match!");
+        fmt::println(stderr, "not match!");
         exit(1);
     }
     std::this_thread::sleep_for(std::chrono::milliseconds(WAIT_TIME));
 
-    std::println("--------------------------------------");
+    fmt::println("--------------------------------------");
     mat3 = originMat3;
     assert(ctx.subgroupSize == 32);
     run(
@@ -324,13 +324,13 @@ int main(int argc, char** argv) {
         {32, 4, 2}
     );
     if (!testResult(mat3, resultRef)) {
-        std::println(stderr, "not match!");
+        fmt::println(stderr, "not match!");
         exit(1);
     }
 
     std::this_thread::sleep_for(std::chrono::milliseconds(WAIT_TIME));
 
-    std::println("--------------------------------------");
+    fmt::println("--------------------------------------");
     mat3 = originMat3;
     run(
         ctx,
@@ -344,13 +344,13 @@ int main(int argc, char** argv) {
     );
     ctx.device.waitIdle();
     if (!testResult(mat3, resultRef)) {
-        std::println(stderr, "not match!");
+        fmt::println(stderr, "not match!");
         exit(1);
     }
-    std::println("Test Pass. Done.");
+    fmt::println("Test Pass. Done.");
     std::this_thread::sleep_for(std::chrono::milliseconds(WAIT_TIME));
 
-    std::println("--------------------------------------");
+    fmt::println("--------------------------------------");
     mat3 = originMat3;
     run(
         ctx,
@@ -364,13 +364,13 @@ int main(int argc, char** argv) {
     );
     ctx.device.waitIdle();
     if (!testResult(mat3, resultRef)) {
-        std::println(stderr, "not match!");
+        fmt::println(stderr, "not match!");
         exit(1);
     }
-    std::println("Test Pass. Done.");
+    fmt::println("Test Pass. Done.");
     std::this_thread::sleep_for(std::chrono::milliseconds(WAIT_TIME));
 
-    std::println("--------------------------------------");
+    fmt::println("--------------------------------------");
     mat3 = originMat3;
     run(
         ctx,
@@ -384,13 +384,13 @@ int main(int argc, char** argv) {
     );
     ctx.device.waitIdle();
     if (!testResult(mat3, resultRef)) {
-        std::println(stderr, "not match!");
+        fmt::println(stderr, "not match!");
         exit(1);
     }
-    std::println("Test Pass. Done.");
+    fmt::println("Test Pass. Done.");
     std::this_thread::sleep_for(std::chrono::milliseconds(WAIT_TIME));
 
-    std::println("--------------------------------------");
+    fmt::println("--------------------------------------");
     mat3 = originMat3;
     run(
         ctx,
@@ -404,13 +404,13 @@ int main(int argc, char** argv) {
     );
     ctx.device.waitIdle();
     if (!testResult(mat3, resultRef)) {
-        std::println(stderr, "not match!");
+        fmt::println(stderr, "not match!");
         exit(1);
     }
-    std::println("Test Pass. Done.");
+    fmt::println("Test Pass. Done.");
     std::this_thread::sleep_for(std::chrono::milliseconds(WAIT_TIME));
 
-    std::println("--------------------------------------");
+    fmt::println("--------------------------------------");
     mat3 = originMat3;
     run(
         ctx,
@@ -423,12 +423,12 @@ int main(int argc, char** argv) {
         {ctx.subgroupSize, 2, 2}
     );
     if (!testResult(mat3, resultRef)) {
-        std::println(stderr, "not match!");
+        fmt::println(stderr, "not match!");
         exit(1);
     }
     std::this_thread::sleep_for(std::chrono::milliseconds(WAIT_TIME));
 
-    std::println("--------------------------------------");
+    fmt::println("--------------------------------------");
     mat3 = originMat3;
     run(
         ctx,
@@ -441,11 +441,11 @@ int main(int argc, char** argv) {
         {ctx.subgroupSize, 4, 2}
     );
     if (!testResult(mat3, resultRef)) {
-        std::println(stderr, "not match!");
+        fmt::println(stderr, "not match!");
         exit(1);
     }
 
-    std::println("Test Pass. Done.");
+    fmt::println("Test Pass. Done.");
 
     return 0;
 }
