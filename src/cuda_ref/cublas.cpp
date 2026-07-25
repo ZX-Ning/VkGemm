@@ -31,7 +31,7 @@
         }                                                               \
     } while (false)
 
-void runCuBlas(
+size_t runCuBlas(
     uint32_t matSize,
     Eigen::MatrixX<Eigen::half>& mat1,
     Eigen::MatrixX<Eigen::half>& mat2,
@@ -71,14 +71,14 @@ void runCuBlas(
     ));
 
     CUDA_CHECK(cudaDeviceSynchronize());
-    size_t time1 = getTimestampMs();
-
+    
     cublasHandle_t handle = nullptr;
     CUBLAS_CHECK(cublasCreate(&handle));
-
+    
     const float alpha = 1.0f;
     const float beta = 1.0f;
-
+    
+    size_t time1 = getTimestampMs();
     CUBLAS_CHECK(cublasGemmEx(
         handle,
 
@@ -110,7 +110,8 @@ void runCuBlas(
     ));
 
     CUDA_CHECK(cudaDeviceSynchronize());
-    fmt::println("cuBlas Compute Done. Time: {} ms", getTimestampMs() - time1);
+    size_t timeUsed = getTimestampMs() - time1;
+    fmt::println("cuBlas Compute Done. Time: {} ms", timeUsed);
 
     CUDA_CHECK(cudaMemcpy(
         mat3.data(),
@@ -124,6 +125,7 @@ void runCuBlas(
     CUDA_CHECK(cudaFree(d_A));
     CUDA_CHECK(cudaFree(d_B));
     CUDA_CHECK(cudaFree(d_C));
+    return timeUsed;
 }
 
 #endif

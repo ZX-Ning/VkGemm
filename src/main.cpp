@@ -1,5 +1,6 @@
-#include <algorithm>
 #include <fmt/format.h>
+
+#include <algorithm>
 #include <random>
 
 #include "core/Buffer.hpp"
@@ -117,7 +118,7 @@ auto genData(int matSize) {
     return std::tuple{std::move(mat1), std::move(mat2), std::move(mat3)};
 }
 
-int run(
+size_t run(
     VulkanContext& ctx,
     const std::string& spvPath,
     uint32_t tileSize,
@@ -267,14 +268,33 @@ int run(
         ctx.queue.submit(submitInfo, nullptr);
         ctx.queue.waitIdle();
     }
-    fmt::println("Compute Done. Time used: {} ms", getTimestampMs() - time1);
+    size_t timeUsed = getTimestampMs() - time1;
+    fmt::println("Compute Done. Time used: {} ms. Reading back result...", timeUsed);
     matCBuf->readBackSyncDangerous(ctx, (uint8_t*)mat3.data());
     fmt::println("Result read back. Begin validation.");
-    return 0;
+    ctx.device.waitIdle();
+    return timeUsed;
 }
 
+struct TestOption {
+    const char* spvPath;
+    uint32_t tileSize;
+    std::array<uint32_t, 3> numthreads;
+};
+
+constexpr TestOption TESTS[] = {
+    {"shaders/gemm_coopmat_tiled_opt3.spv", 64, {32, 4, 2}},
+    {"shaders/gemm_coopmat_tiled_opt4.spv", 64, {32, 4, 2}},
+    {"shaders/gemm.spv", 32, {32, 32, 1}},
+    {"shaders/gemm_coopmat.spv", 16, {32, 1, 1}},
+    {"shaders/gemm_coopmat_opt.spv", 32, {32, 1, 1}},
+    {"shaders/gemm_coopmat_tiled.spv", 64, {32, 4, 4}},
+    {"shaders/gemm_coopmat_tiled_opt.spv", 64, {32, 2, 2}},
+    {"shaders/gemm_coopmat_tiled_opt2.spv", 64, {32, 4, 2}},
+};
+
 int main(int argc, char** argv) {
-    constexpr int WAIT_TIME = 5000;
+    constexpr int COOLDOWN_TIME = 5000;
     size_t matSize = 1 << 14;
     if (argc == 2) {
         matSize = std::stoi(argv[1]);
@@ -283,169 +303,54 @@ int main(int argc, char** argv) {
     auto [mat1, mat2, mat3] = genData(matSize);
     Eigen::MatrixXf originMat3(mat3);
     Eigen::MatrixXf resultRef(mat3);
-    fmt::println("--------------------------------------");
+    std::vector<std::tuple<std::string, int>> results;
+    fmt::println("{:-^60}","");
 #ifdef CUBLAS
-    runCuBlas(matSize, mat1, mat2, resultRef);
+    size_t refTime = runCuBlas(matSize, mat1, mat2, resultRef);
+    results.push_back({"cuBLAS (reference)", refTime});
 #else
     runCpu(mat1, mat2, mat3_ref);
 #endif
-    std::this_thread::sleep_for(std::chrono::milliseconds(WAIT_TIME));
-
-    fmt::println("--------------------------------------");
-    mat3 = originMat3;
-    assert(ctx.subgroupSize == 32);
-    run(
-        ctx,
-        "shaders/gemm_coopmat_tiled_opt3.spv",
-        64,
-        matSize,
-        mat1,
-        mat2,
-        mat3,
-        {32, 4, 2}
-    );
-    if (!testResult(mat3, resultRef)) {
-        fmt::println(stderr, "not match!");
-        exit(1);
-    }
-    std::this_thread::sleep_for(std::chrono::milliseconds(WAIT_TIME));
-
-    fmt::println("--------------------------------------");
-    mat3 = originMat3;
-    assert(ctx.subgroupSize == 32);
-    run(
-        ctx,
-        "shaders/gemm_coopmat_tiled_opt4.spv",
-        64,
-        matSize,
-        mat1,
-        mat2,
-        mat3,
-        {32, 4, 2}
-    );
-    if (!testResult(mat3, resultRef)) {
-        fmt::println(stderr, "not match!");
+    if (ctx.subgroupSize != 32) {
+        fmt::println(stderr, "Subgroup size is {} not 32 ! Abort.", ctx.subgroupSize);
         exit(1);
     }
 
-    std::this_thread::sleep_for(std::chrono::milliseconds(WAIT_TIME));
-
-    fmt::println("--------------------------------------");
-    mat3 = originMat3;
-    run(
-        ctx,
-        "shaders/gemm.spv",
-        32,
-        matSize,
-        mat1,
-        mat2,
-        mat3,
-        {32, 32, 1}
-    );
-    ctx.device.waitIdle();
-    if (!testResult(mat3, resultRef)) {
-        fmt::println(stderr, "not match!");
-        exit(1);
-    }
-    fmt::println("Test Pass. Done.");
-    std::this_thread::sleep_for(std::chrono::milliseconds(WAIT_TIME));
-
-    fmt::println("--------------------------------------");
-    mat3 = originMat3;
-    run(
-        ctx,
-        "shaders/gemm_coopmat.spv",
-        16,
-        matSize,
-        mat1,
-        mat2,
-        mat3,
-        {ctx.subgroupSize, 1, 1}
-    );
-    ctx.device.waitIdle();
-    if (!testResult(mat3, resultRef)) {
-        fmt::println(stderr, "not match!");
-        exit(1);
-    }
-    fmt::println("Test Pass. Done.");
-    std::this_thread::sleep_for(std::chrono::milliseconds(WAIT_TIME));
-
-    fmt::println("--------------------------------------");
-    mat3 = originMat3;
-    run(
-        ctx,
-        "shaders/gemm_coopmat_opt.spv",
-        32,
-        matSize,
-        mat1,
-        mat2,
-        mat3,
-        {ctx.subgroupSize, 1, 1}
-    );
-    ctx.device.waitIdle();
-    if (!testResult(mat3, resultRef)) {
-        fmt::println(stderr, "not match!");
-        exit(1);
-    }
-    fmt::println("Test Pass. Done.");
-    std::this_thread::sleep_for(std::chrono::milliseconds(WAIT_TIME));
-
-    fmt::println("--------------------------------------");
-    mat3 = originMat3;
-    run(
-        ctx,
-        "shaders/gemm_coopmat_tiled.spv",
-        64,
-        matSize,
-        mat1,
-        mat2,
-        mat3,
-        {ctx.subgroupSize, 4, 4}
-    );
-    ctx.device.waitIdle();
-    if (!testResult(mat3, resultRef)) {
-        fmt::println(stderr, "not match!");
-        exit(1);
-    }
-    fmt::println("Test Pass. Done.");
-    std::this_thread::sleep_for(std::chrono::milliseconds(WAIT_TIME));
-
-    fmt::println("--------------------------------------");
-    mat3 = originMat3;
-    run(
-        ctx,
-        "shaders/gemm_coopmat_tiled_opt.spv",
-        64,
-        matSize,
-        mat1,
-        mat2,
-        mat3,
-        {ctx.subgroupSize, 2, 2}
-    );
-    if (!testResult(mat3, resultRef)) {
-        fmt::println(stderr, "not match!");
-        exit(1);
-    }
-    std::this_thread::sleep_for(std::chrono::milliseconds(WAIT_TIME));
-
-    fmt::println("--------------------------------------");
-    mat3 = originMat3;
-    run(
-        ctx,
-        "shaders/gemm_coopmat_tiled_opt2.spv",
-        64,
-        matSize,
-        mat1,
-        mat2,
-        mat3,
-        {ctx.subgroupSize, 4, 2}
-    );
-    if (!testResult(mat3, resultRef)) {
-        fmt::println(stderr, "not match!");
-        exit(1);
+    for (const auto& test : TESTS) {
+        fmt::println("Cooldown {} ms...", COOLDOWN_TIME);
+        std::this_thread::sleep_for(std::chrono::milliseconds(COOLDOWN_TIME));
+        fmt::println("{:-^60}","");
+        mat3 = originMat3;
+        uint64_t time = run(
+            ctx,
+            test.spvPath,
+            test.tileSize,
+            matSize,
+            mat1,
+            mat2,
+            mat3,
+            test.numthreads
+        );
+        if (!testResult(mat3, resultRef)) {
+            fmt::println(stderr, "not match!!!");
+            exit(1);
+        }
+        results.push_back({test.spvPath, time});
+        fmt::println("Test Pass.");
     }
 
-    fmt::println("Test Pass. Done.");
-
+    fmt::println("");
+    fmt::println("{:-^60}", "RESULT");
+    std::ranges::sort(
+        results,
+        [](const auto& r1, const auto& r2) { return std::get<1>(r1) < std::get<1>(r2); }
+    );
+    for (auto& [spvPath, time] : results) {
+#ifdef CUBLAS
+        fmt::println("{:<40} {:>15} ms ({:6.2f}%)", spvPath + ":", time, 100.0 * refTime / time);
+#else
+        fmt::println("{:<40}: {:>15} ms", spvPath, time);
+#endif
+    }
     return 0;
 }
