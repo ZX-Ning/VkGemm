@@ -1,13 +1,8 @@
 /**
  * This file contains AI-generated code.
  */
-
 /**
- * Fast path for column-major GEMM:
- *
- *   A:   M x K, FP16
- *   B:   K x N, FP16
- *   ACC: M x N, FP32
+ * opt3 plus a skewed shared-memory layout.
  *
  * Requirements:
  *   - M, N and K are multiples of 64.
@@ -18,16 +13,19 @@
  * region represented by two vertically adjacent 16x16 accumulators.
  */
 
-#define COOP_TILE_SIZE      16
-#define WORKGROUP_TILE_SIZE 64
-#define TILE_ELEMENT_COUNT  (WORKGROUP_TILE_SIZE * WORKGROUP_TILE_SIZE)
+#define COOP_TILE_SIZE       16
+#define WORKGROUP_TILE_SIZE  64
+#define TILE_ELEMENT_COUNT   (WORKGROUP_TILE_SIZE * WORKGROUP_TILE_SIZE)
+#define SHARED_SKEW          8
+#define SHARED_STRIDE        (WORKGROUP_TILE_SIZE + SHARED_SKEW)
+#define SHARED_ELEMENT_COUNT (SHARED_STRIDE * WORKGROUP_TILE_SIZE)
 
-constexpr static uint SUBGROUP_SIZE = 32;
-constexpr static uint SUBGROUP_COUNT = 8;
-constexpr static uint GROUP_THREAD_COUNT = SUBGROUP_SIZE * SUBGROUP_COUNT;
-constexpr static uint SUBGROUP_TILE_ROWS = COOP_TILE_SIZE * 2;
-constexpr static uint SUBGROUP_TILE_COLS = COOP_TILE_SIZE;
-constexpr static uint PACKED_HALF_COUNT = 2;
+const static uint SUBGROUP_SIZE = 32;
+const static uint SUBGROUP_COUNT = 8;
+const static uint GROUP_THREAD_COUNT = SUBGROUP_SIZE * SUBGROUP_COUNT;
+const static uint SUBGROUP_TILE_ROWS = COOP_TILE_SIZE * 2;
+const static uint SUBGROUP_TILE_COLS = COOP_TILE_SIZE;
+const static uint PACKED_HALF_COUNT = 2;
 
 [vk::constant_id(0)]
 const uint NUM_THREADS_X;
@@ -38,8 +36,6 @@ const uint NUM_THREADS_Y;
 [vk::constant_id(2)]
 const uint NUM_THREADS_Z;
 
-// The matrices are guaranteed to be aligned and evenly divisible, so only the
-// packed 32-bit input views are needed.
 [[vk_binding(0, 0)]]
 StructuredBuffer<half2> mat_a;
 
@@ -79,14 +75,15 @@ typealias MatACC = linalg::CoopMat<
 
 const static let COL_MAJ = linalg::CoopMatMatrixLayout::ColumnMajor;
 
-groupshared half s_a[TILE_ELEMENT_COUNT];
-groupshared half s_b[TILE_ELEMENT_COUNT];
+// A stride of 72 half values is 144 bytes. Adjacent columns therefore move by
+// four 4-byte banks instead of wrapping to the same bank as stride 64 does.
+// The 144-byte stride also preserves the 16-byte alignment required by the
+// cooperative-matrix shared loads used below.
+groupshared half s_a[SHARED_ELEMENT_COUNT];
+groupshared half s_b[SHARED_ELEMENT_COUNT];
 
 /**
- * Load one 64x64 A panel and one 64x64 B panel.
- *
- * Every iteration performs one 32-bit load from A and B. The linear shared
- * index is always even, so each half2 maps to two adjacent rows in one column.
+ * Load logical 64x64 panels into the physical 72x64 shared arrays.
  */
 [[ForceInline]]
 inline void load_input_panels_to_shared(
@@ -105,15 +102,17 @@ inline void load_input_panels_to_shared(
             (k_offset + move_col) * shape.M + row_offset + move_row;
         uint b_index =
             (col_offset + move_col) * shape.K + k_offset + move_row;
+        // `move` already contains move_col * 64; add eight padding elements
+        // for every preceding column to obtain the physical shared index.
+        uint shared_index = move + (move_col << 3);
 
         half2 a_values = mat_a[a_index >> 1];
         half2 b_values = mat_b[b_index >> 1];
 
-        // CoopMat.Load expects scalar half arrays.
-        s_a[move] = a_values.x;
-        s_a[move + 1] = a_values.y;
-        s_b[move] = b_values.x;
-        s_b[move + 1] = b_values.y;
+        s_a[shared_index] = a_values.x;
+        s_a[shared_index + 1] = a_values.y;
+        s_b[shared_index] = b_values.x;
+        s_b[shared_index + 1] = b_values.y;
     }
 }
 
@@ -121,8 +120,8 @@ inline void load_input_panels_to_shared(
 inline MatA load_a_from_shared(uint shared_row, uint shared_k) {
     return MatA.Load<COL_MAJ>(
         s_a,
-        shared_row + shared_k * WORKGROUP_TILE_SIZE,
-        WORKGROUP_TILE_SIZE
+        shared_row + shared_k * SHARED_STRIDE,
+        SHARED_STRIDE
     );
 }
 
@@ -130,15 +129,11 @@ inline MatA load_a_from_shared(uint shared_row, uint shared_k) {
 inline MatB load_b_from_shared(uint shared_col, uint shared_k) {
     return MatB.Load<COL_MAJ>(
         s_b,
-        shared_k + shared_col * WORKGROUP_TILE_SIZE,
-        WORKGROUP_TILE_SIZE
+        shared_k + shared_col * SHARED_STRIDE,
+        SHARED_STRIDE
     );
 }
 
-/**
- * Initialize an accumulator fragment from global C so the kernel preserves
- * the existing C += A*B behavior without a separate scalar output pass.
- */
 [[ForceInline]]
 inline MatACC load_accumulator(uint global_row, uint global_col) {
     return MatACC.Load<COL_MAJ>(
@@ -167,7 +162,6 @@ void main(
     uint3 group_id: SV_GroupID,
     uint local_index: SV_GroupIndex
 ) {
-    // Fixed 32-lane subgroups make the subgroup mapping simple integer shifts.
     uint subgroup_index = local_index >> 5;
     uint subgroup_row = subgroup_index & 1;
     uint subgroup_col = subgroup_index >> 1;
@@ -209,7 +203,6 @@ void main(
                 linalg::coopMatMulAdd<float, false>(a_bottom, b, acc_bottom);
         }
 
-        // Prevent the next panel load from overwriting data still being read.
         GroupMemoryBarrierWithGroupSync();
     }
 

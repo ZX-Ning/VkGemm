@@ -2,31 +2,32 @@ add_rules("mode.debug", "mode.release")
 set_policy("build.warning", true)
 set_warnings("all", "extra")
 
+includes("xmake/*.lua")
+
 -- if (is_plat("linux")) then
 --     add_requires("libsdl3", {configs = {wayland = true}})
 -- else
 --     add_requires("libsdl3", {system = false})
 -- end
 
-option("cuBlas", function () 
+option("cuBlas", function()
     set_description("Enable cuBLAS for reference")
     set_default(true)
-    add_defines("CUBLAS") 
+    add_defines("CUBLAS")
     add_includedirs("/usr/local/cuda/include")
     add_linkdirs("/usr/local/cuda/lib64")
     add_links("cublas", "cudart")
 end)
 
-
-add_requires("vulkan-hpp", "vulkan-memory-allocator", "eigen", "openmp", "fmt")
+add_requires("vulkan-hpp", "vulkan-memory-allocator", "eigen", "openmp", "fmt", "slang-static v2026.14")
 
 target("learn_vulkan", function()
     set_kind("binary")
     set_languages("c17", "c++23")
-    add_files("src/*.cpp")
-    add_files("src/core/**.cpp")
+    add_files("src/**.cpp")
     add_files("src/cuda_ref/*.cpp")
-    add_packages("vulkan-hpp", "vulkan-memory-allocator", "eigen", "openmp", "fmt")
+    add_packages("vulkan-hpp", "vulkan-memory-allocator", "eigen", "openmp",
+                 "fmt", "slang-static")
     add_options("cuBlas")
 
     add_defines("VK_NO_PROTOTYPES")

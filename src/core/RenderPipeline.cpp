@@ -7,11 +7,11 @@
 namespace {
 vk::raii::ShaderModule createShaderModule(
     const vk::raii::Device& device,
-    const std::span<const uint8_t> spv
+    const std::span<const uint32_t> spv
 ) {
     vk::ShaderModuleCreateInfo createInfo{
-        .codeSize = spv.size() * sizeof(char),
-        .pCode = reinterpret_cast<const uint32_t*>(spv.data())
+        .codeSize = spv.size_bytes(),
+        .pCode = spv.data()
     };
     vk::raii::ShaderModule shaderModule{device, createInfo};
 

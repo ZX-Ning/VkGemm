@@ -6,6 +6,7 @@
 #include "core/Buffer.hpp"
 #include "core/RenderPipeline.hpp"
 #include "core/VulkanContext.hpp"
+#include "shader/SlangShaderCompiler.hpp"
 #include "utils.hpp"
 //
 #include <Eigen/Dense>
@@ -120,7 +121,7 @@ auto genData(int matSize) {
 
 size_t run(
     VulkanContext& ctx,
-    const std::string& spvPath,
+    std::span<const uint32_t> spv,
     uint32_t tileSize,
     uint32_t matSize,
     Eigen::MatrixX<Eigen::half>& mat1,
@@ -129,7 +130,6 @@ size_t run(
     std::array<uint32_t, 3> numthreads
 
 ) {
-    fmt::println("Running kernel: {}, Matrix size: {}x{}", spvPath, matSize, matSize);
     int bufSize = matSize * matSize;
     auto bindslayouts = createComputeBindingLayouts(3);
     auto setLayout = ctx.device.createDescriptorSetLayout(
@@ -150,7 +150,7 @@ size_t run(
     );
     auto pipeline = createComputePipeline(
         ctx,
-        {layout, readFile(spvPath)},
+        {layout, spv},
         numthreads
     );
 
@@ -277,34 +277,33 @@ size_t run(
 }
 
 struct TestOption {
-    const char* spvPath;
+    const char* shaderPath;
     uint32_t tileSize;
     std::array<uint32_t, 3> numthreads;
 };
 
 constexpr TestOption TESTS[] = {
-    {"shaders/gemm_coopmat_tiled_opt3.spv", 64, {32, 4, 2}},
-    {"shaders/gemm_coopmat_tiled_opt4.spv", 64, {32, 4, 2}},
-    {"shaders/gemm.spv", 32, {32, 32, 1}},
-    {"shaders/gemm_coopmat.spv", 16, {32, 1, 1}},
-    {"shaders/gemm_coopmat_opt.spv", 32, {32, 1, 1}},
-    {"shaders/gemm_coopmat_tiled.spv", 64, {32, 4, 4}},
-    {"shaders/gemm_coopmat_tiled_opt.spv", 64, {32, 2, 2}},
-    {"shaders/gemm_coopmat_tiled_opt2.spv", 64, {32, 4, 2}},
+    {"shaders/gemm/experiment.slang", 64, {32, 4, 2}},
+    {"shaders/gemm/plain.slang", 32, {32, 32, 1}},
+    {"shaders/gemm/coopmat_plain.slang", 16, {32, 1, 1}},
+    {"shaders/gemm/coopmat_plain_4acc.slang", 32, {32, 1, 1}},
+    {"shaders/gemm/coopmat_tiled_1acc.slang", 64, {32, 4, 4}},
+    {"shaders/gemm/coopmat_4acc_simpleload.slang", 64, {32, 2, 2}},
 };
 
 int main(int argc, char** argv) {
-    constexpr int COOLDOWN_TIME = 5000;
+    constexpr int COOLDOWN_TIME = 2000;
     size_t matSize = 1 << 14;
     if (argc == 2) {
         matSize = std::stoi(argv[1]);
     }
     VulkanContext ctx{};
+    SlangShaderCompiler shaderCompiler;
     auto [mat1, mat2, mat3] = genData(matSize);
     Eigen::MatrixXf originMat3(mat3);
     Eigen::MatrixXf resultRef(mat3);
     std::vector<std::tuple<std::string, int>> results;
-    fmt::println("{:-^60}","");
+    fmt::println("{:-^60}", "");
 #ifdef CUBLAS
     size_t refTime = runCuBlas(matSize, mat1, mat2, resultRef);
     results.push_back({"cuBLAS (reference)", refTime});
@@ -319,11 +318,23 @@ int main(int argc, char** argv) {
     for (const auto& test : TESTS) {
         fmt::println("Cooldown {} ms...", COOLDOWN_TIME);
         std::this_thread::sleep_for(std::chrono::milliseconds(COOLDOWN_TIME));
-        fmt::println("{:-^60}","");
+        fmt::println("{:-^60}", "");
+        fmt::println("Compiling kernel: {}", test.shaderPath);
+        const auto shaderSource = readFile(test.shaderPath);
+        const auto spv = shaderCompiler.genSpirv(std::string_view{
+            reinterpret_cast<const char*>(shaderSource.data()),
+            shaderSource.size(),
+        });
+        fmt::println(
+            "Running kernel: {}, Matrix size: {}x{}",
+            test.shaderPath,
+            matSize,
+            matSize
+        );
         mat3 = originMat3;
         uint64_t time = run(
             ctx,
-            test.spvPath,
+            spv,
             test.tileSize,
             matSize,
             mat1,
@@ -335,7 +346,7 @@ int main(int argc, char** argv) {
             fmt::println(stderr, "not match!!!");
             exit(1);
         }
-        results.push_back({test.spvPath, time});
+        results.push_back({test.shaderPath, time});
         fmt::println("Test Pass.");
     }
 
@@ -347,9 +358,9 @@ int main(int argc, char** argv) {
     );
     for (auto& [spvPath, time] : results) {
 #ifdef CUBLAS
-        fmt::println("{:<40} {:>15} ms ({:6.2f}%)", spvPath + ":", time, 100.0 * refTime / time);
+        fmt::println("{:<50} {:>15} ms ({:.2f}%)", spvPath + ":", time, 100.0 * refTime / time);
 #else
-        fmt::println("{:<40}: {:>15} ms", spvPath, time);
+        fmt::println("{:<50}: {:>15} ms", spvPath, time);
 #endif
     }
     return 0;

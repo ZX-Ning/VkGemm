@@ -1,8 +1,8 @@
 #define COOP_TILE_SIZE  16
 #define COOP_TILES      4
 #define LARGE_TILE_SIZE 64
-constexpr static int SUB_TILES = (COOP_TILES / 2);
-constexpr static int SUB_TILE_SIZE = COOP_TILE_SIZE * 2;
+const static int SUB_TILES = (COOP_TILES / 2);
+const static int SUB_TILE_SIZE = COOP_TILE_SIZE * 2;
 // #define SUBGROUP_SIZE 32
 
 [vk::constant_id(0)]

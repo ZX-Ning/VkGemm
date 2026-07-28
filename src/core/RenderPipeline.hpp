@@ -14,7 +14,7 @@ struct Pipeline {
 
 struct GraphicsPipelineDesc {
     vk::PipelineLayout layout;
-    std::span<const uint8_t> shaderSpv;
+    std::span<const uint32_t> shaderSpv;
     vk::PipelineVertexInputStateCreateInfo vertexInfo;
     vk::Format colorFormat;
     vk::Format depthFormat;
@@ -22,7 +22,7 @@ struct GraphicsPipelineDesc {
 
 struct ComputePipelineDesc {
     vk::PipelineLayout layout;
-    std::span<const uint8_t> shaderSpv;
+    std::span<const uint32_t> shaderSpv;
 };
 
 std::shared_ptr<Pipeline> createGraphicsPipeline(
