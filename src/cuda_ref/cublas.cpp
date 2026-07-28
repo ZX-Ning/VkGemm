@@ -70,10 +70,11 @@ size_t runCuBlas(
         cudaMemcpyHostToDevice
     ));
 
-    CUDA_CHECK(cudaDeviceSynchronize());
     
     cublasHandle_t handle = nullptr;
     CUBLAS_CHECK(cublasCreate(&handle));
+    
+    CUDA_CHECK(cudaDeviceSynchronize());
     
     const float alpha = 1.0f;
     const float beta = 1.0f;

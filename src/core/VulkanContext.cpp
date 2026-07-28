@@ -33,7 +33,22 @@ const std::vector<const char*> requiredDeviceExtensions = {
 };
 
 constexpr uint32_t COOPERATIVE_MATRIX_TILE_SIZE = 16;
+constexpr uint32_t COOPERATIVE_MATRIX2_TILE_SIZE = 64;
+constexpr uint32_t COOPERATIVE_MATRIX2_WORKGROUP_SIZE = 128;
 // constexpr uint32_t COOPERATIVE_MATRIX_SUBGROUP_SIZE = 32;
+
+bool supportsDeviceExtension(
+    const vk::raii::PhysicalDevice& device,
+    const char* extensionName
+) {
+    for (const auto& extension :
+         device.enumerateDeviceExtensionProperties()) {
+        if (strcmp(extension.extensionName, extensionName) == 0) {
+            return true;
+        }
+    }
+    return false;
+}
 
 bool supportsRequiredCooperativeMatrixType(
     const vk::raii::PhysicalDevice& device
@@ -52,6 +67,68 @@ bool supportsRequiredCooperativeMatrixType(
         }
     }
     return false;
+}
+
+bool supportsRequiredCooperativeMatrix2Type(
+    const vk::raii::PhysicalDevice& device
+) {
+    if (!supportsDeviceExtension(
+            device,
+            vk::NVCooperativeMatrix2ExtensionName
+        )) {
+        return false;
+    }
+
+    const auto featureChain = device.getFeatures2<
+        vk::PhysicalDeviceFeatures2,
+        vk::PhysicalDeviceCooperativeMatrix2FeaturesNV>();
+    const auto& features =
+        featureChain.get<vk::PhysicalDeviceCooperativeMatrix2FeaturesNV>();
+    if (!features.cooperativeMatrixWorkgroupScope ||
+        !features.cooperativeMatrixFlexibleDimensions ||
+        !features.cooperativeMatrixTensorAddressing) {
+        return false;
+    }
+
+    const auto propertyChain = device.getProperties2<
+        vk::PhysicalDeviceProperties2,
+        vk::PhysicalDeviceCooperativeMatrix2PropertiesNV>();
+    const auto& properties =
+        propertyChain.get<vk::PhysicalDeviceCooperativeMatrix2PropertiesNV>();
+    const bool supportsRequiredLimits =
+        properties.cooperativeMatrixWorkgroupScopeMaxWorkgroupSize >=
+            COOPERATIVE_MATRIX2_WORKGROUP_SIZE &&
+        properties.cooperativeMatrixFlexibleDimensionsMaxDimension >=
+            COOPERATIVE_MATRIX2_TILE_SIZE;
+
+    // A flexible-dimensions entry describes the element types, scope and
+    // workgroup size supported by one family of matrix shapes. The requested
+    // shape must be an integer multiple of that family's granularities.
+    const auto flexibleDimensions =
+        device.getCooperativeMatrixFlexibleDimensionsPropertiesNV();
+    bool supportsRequiredType = false;
+    for (const auto& matrix : flexibleDimensions) {
+        const bool validGranularity =
+            matrix.MGranularity != 0 &&
+            matrix.NGranularity != 0 &&
+            matrix.KGranularity != 0 &&
+            COOPERATIVE_MATRIX2_TILE_SIZE % matrix.MGranularity == 0 &&
+            COOPERATIVE_MATRIX2_TILE_SIZE % matrix.NGranularity == 0 &&
+            COOPERATIVE_MATRIX2_TILE_SIZE % matrix.KGranularity == 0;
+
+        if (validGranularity &&
+            matrix.AType == vk::ComponentTypeKHR::eFloat16 &&
+            matrix.BType == vk::ComponentTypeKHR::eFloat16 &&
+            matrix.CType == vk::ComponentTypeKHR::eFloat32 &&
+            matrix.ResultType == vk::ComponentTypeKHR::eFloat32 &&
+            !matrix.saturatingAccumulation &&
+            matrix.scope == vk::ScopeKHR::eWorkgroup &&
+            matrix.workgroupInvocations ==
+                COOPERATIVE_MATRIX2_WORKGROUP_SIZE) {
+            supportsRequiredType = true;
+        }
+    }
+    return supportsRequiredLimits && supportsRequiredType;
 }
 
 std::vector<const char*> getRequiredExtensions() {
@@ -339,7 +416,14 @@ VulkanContext::VulkanContext() {
         vk::PhysicalDeviceSubgroupProperties>();
     auto props2 = propsChain.get<vk::PhysicalDeviceProperties2>();
     this->subgroupSize = propsChain.get<vk::PhysicalDeviceSubgroupProperties>().subgroupSize;
-    fmt::println("Device: {}, subgroupSize={}", props2.properties.deviceName.data(), this->subgroupSize);
+    this->cooperativeMatrix2Supported =
+        supportsRequiredCooperativeMatrix2Type(this->physicalDevice);
+    fmt::println(
+        "Device: {}, subgroupSize={}, cooperativeMatrix2={}",
+        props2.properties.deviceName.data(),
+        this->subgroupSize,
+        this->cooperativeMatrix2Supported
+    );
 
     initLogicalDevice();
     initVmaAllocator();
@@ -362,6 +446,10 @@ VulkanContext::VulkanContext() {
 VulkanContext::~VulkanContext() {
     fmt::println("Cleaning up Vulkan instance.");
 };
+
+bool VulkanContext::supportsCooperativeMatrix2() const {
+    return cooperativeMatrix2Supported;
+}
 
 void VulkanContext::initLogicalDevice() {
     std::vector<vk::QueueFamilyProperties> queueFamilyProperties =
@@ -401,8 +489,25 @@ void VulkanContext::initLogicalDevice() {
             .maintenance4 = true
         },
         vk::PhysicalDeviceExtendedDynamicStateFeaturesEXT{.extendedDynamicState = true},
-        vk::PhysicalDeviceCooperativeMatrixFeaturesKHR{.cooperativeMatrix = true}
+        vk::PhysicalDeviceCooperativeMatrixFeaturesKHR{.cooperativeMatrix = true},
+        vk::PhysicalDeviceCooperativeMatrix2FeaturesNV{
+            .cooperativeMatrixWorkgroupScope = true,
+            .cooperativeMatrixFlexibleDimensions = true,
+            .cooperativeMatrixTensorAddressing = true
+        }
     };
+    if (!cooperativeMatrix2Supported) {
+        featureChain
+            .unlink<vk::PhysicalDeviceCooperativeMatrix2FeaturesNV>();
+    }
+
+    std::vector<const char*> enabledDeviceExtensions =
+        requiredDeviceExtensions;
+    if (cooperativeMatrix2Supported) {
+        enabledDeviceExtensions.push_back(
+            vk::NVCooperativeMatrix2ExtensionName
+        );
+    }
 
     // create a Device
     float queuePriority = 0.5f;
@@ -416,8 +521,8 @@ void VulkanContext::initLogicalDevice() {
         .queueCreateInfoCount = 1,
         .pQueueCreateInfos = &deviceQueueCreateInfo,
         .enabledExtensionCount =
-            static_cast<uint32_t>(requiredDeviceExtensions.size()),
-        .ppEnabledExtensionNames = requiredDeviceExtensions.data()
+            static_cast<uint32_t>(enabledDeviceExtensions.size()),
+        .ppEnabledExtensionNames = enabledDeviceExtensions.data()
     };
 
     this->device = vk::raii::Device(physicalDevice, deviceCreateInfo);

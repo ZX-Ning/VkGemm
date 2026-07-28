@@ -280,19 +280,43 @@ struct TestOption {
     const char* shaderPath;
     uint32_t tileSize;
     std::array<uint32_t, 3> numthreads;
+    uint32_t matSizeMultiple;
+    bool requiresCooperativeMatrix2 = false;
 };
 
 constexpr TestOption TESTS[] = {
-    {"shaders/gemm/experiment.slang", 64, {32, 4, 2}},
-    {"shaders/gemm/plain.slang", 32, {32, 32, 1}},
-    {"shaders/gemm/coopmat_plain.slang", 16, {32, 1, 1}},
-    {"shaders/gemm/coopmat_plain_4acc.slang", 32, {32, 1, 1}},
-    {"shaders/gemm/coopmat_tiled_1acc.slang", 64, {32, 4, 4}},
-    {"shaders/gemm/coopmat_4acc_simpleload.slang", 64, {32, 2, 2}},
+    {"shaders/gemm/experiment.slang", 64, {32, 4, 2}, 64},
+    {"shaders/gemm/coopmat_cm2_64x64.slang",
+     64,
+     {256, 1, 1},
+     64,
+     true},
+    {"shaders/gemm/coopmat_64x64_4acc.slang",
+     64,
+     {32, 2, 2},
+     64},
+    {"shaders/gemm/coopmat_128x128_16acc.slang",
+     128,
+     {32, 2, 2},
+     128},
+    {"shaders/gemm/plain.slang", 32, {32, 32, 1}, 1},
+    {"shaders/gemm/coopmat_plain.slang", 16, {32, 1, 1}, 16},
+    {"shaders/gemm/coopmat_plain_4acc.slang",
+     32,
+     {32, 1, 1},
+     32},
+    {"shaders/gemm/coopmat_tiled_1acc.slang",
+     64,
+     {32, 4, 4},
+     1},
+    {"shaders/gemm/coopmat_4acc_simpleload.slang",
+     64,
+     {32, 2, 2},
+     1},
 };
 
 int main(int argc, char** argv) {
-    constexpr int COOLDOWN_TIME = 2000;
+    constexpr int COOLDOWN_TIME = 5000;
     size_t matSize = 1 << 14;
     if (argc == 2) {
         matSize = std::stoi(argv[1]);
@@ -316,6 +340,25 @@ int main(int argc, char** argv) {
     }
 
     for (const auto& test : TESTS) {
+        if (matSize % test.matSizeMultiple != 0) {
+            fmt::println(
+                "Skipping kernel: {} (matrix size {} is not a multiple of {})",
+                test.shaderPath,
+                matSize,
+                test.matSizeMultiple
+            );
+            continue;
+        }
+
+        if (test.requiresCooperativeMatrix2 &&
+            !ctx.supportsCooperativeMatrix2()) {
+            fmt::println(
+                "Skipping kernel: {} (cooperative matrix 2 unsupported)",
+                test.shaderPath
+            );
+            continue;
+        }
+
         fmt::println("Cooldown {} ms...", COOLDOWN_TIME);
         std::this_thread::sleep_for(std::chrono::milliseconds(COOLDOWN_TIME));
         fmt::println("{:-^60}", "");

@@ -31,9 +31,14 @@ struct VulkanContext {
     explicit VulkanContext();
     ~VulkanContext();
 
+    bool supportsCooperativeMatrix2() const;
+
     DISABLE_COPY(VulkanContext)
     VulkanContext(VulkanContext&&) = delete;
     VulkanContext& operator=(VulkanContext&&) = delete;
+
+private:
+    bool cooperativeMatrix2Supported = false;
 };
 
 #endif  // VULKANCONTEXT_HPP

@@ -102,11 +102,25 @@ struct SlangShaderCompiler::Impl {
             },
             slang::CompilerOptionEntry{
                 .name = slang::CompilerOptionName::Capability,
-                .value = {.kind = slang::CompilerOptionValueKind::String, .stringValue0 = "spvCooperativeMatrixKHR"},
+                .value = {
+                    .kind = slang::CompilerOptionValueKind::String,
+                    .stringValue0 = "spvCooperativeMatrixKHR",
+                },
             },
             slang::CompilerOptionEntry{
                 .name = slang::CompilerOptionName::Capability,
-                .value = {.kind = slang::CompilerOptionValueKind::String, .stringValue0 = "spvGroupNonUniform"},
+                .value = {
+                    .kind = slang::CompilerOptionValueKind::String,
+                    .stringValue0 = "spvGroupNonUniform",
+                },
+            },
+            slang::CompilerOptionEntry{
+                .name = slang::CompilerOptionName::Capability,
+                .value = {.kind = slang::CompilerOptionValueKind::String, .stringValue0 = "spvCooperativeMatrixTensorAddressingNV"},
+            },
+            slang::CompilerOptionEntry{
+                .name = slang::CompilerOptionName::Capability,
+                .value = {.kind = slang::CompilerOptionValueKind::String, .stringValue0 = "spvTensorAddressingNV"},
             },
         };
         slang::TargetDesc targetDesc = {
