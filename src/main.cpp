@@ -286,6 +286,7 @@ struct TestOption {
 
 constexpr TestOption TESTS[] = {
     {"shaders/gemm/experiment.slang", 64, {32, 4, 2}, 64},
+    {"shaders/gemm/experiment2.slang", 64, {32, 4, 2}, 64},
     {"shaders/gemm/coopmat_cm2_64x64.slang",
      64,
      {256, 1, 1},
