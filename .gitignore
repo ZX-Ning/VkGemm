@@ -29,3 +29,5 @@
 compile_commands.json
 build
 imgui.ini
+
+logs/

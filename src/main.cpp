@@ -1,6 +1,8 @@
 #include <fmt/format.h>
+#include <fmt/os.h>
 
 #include <algorithm>
+#include <filesystem>
 #include <random>
 
 #include "core/Buffer.hpp"
@@ -394,18 +396,26 @@ int main(int argc, char** argv) {
         fmt::println("Test Pass.");
     }
 
-    fmt::println("");
-    fmt::println("{:-^60}", "RESULT");
+    fmt::println("Writing log...");
+
+    std::filesystem::create_directory("logs");
+    auto out = fmt::output_file(
+        fmt::format("logs/log-{}.txt", getTimestampMs()),
+        fmt::file::CREATE | fmt::file::WRONLY
+    );
+    out.print("Device: {}\n", ctx.getDeviceName());
+    out.print("Matrix: {}x{}\n", matSize, matSize);
     std::ranges::sort(
         results,
         [](const auto& r1, const auto& r2) { return std::get<1>(r1) < std::get<1>(r2); }
     );
     for (auto& [spvPath, time] : results) {
 #ifdef CUBLAS
-        fmt::println("{:<50} {:>15} ms ({:.2f}%)", spvPath + ":", time, 100.0 * refTime / time);
+        out.print("{:<50} {:>15} ms ({:.2f}%)\n", spvPath + ":", time, 100.0 * refTime / time);
 #else
-        fmt::println("{:<50}: {:>15} ms", spvPath, time);
+        out.print("{:<50}: {:>15} ms\n", spvPath, time);
 #endif
     }
+    fmt::println("Done");
     return 0;
 }

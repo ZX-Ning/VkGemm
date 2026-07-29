@@ -2,11 +2,10 @@
 
 // #include <SDL3/SDL_error.h>
 // #include <SDL3/SDL_vulkan.h>
+#include <fmt/format.h>
 #include <vk_mem_alloc.h>
 
 #include <cassert>
-
-#include <fmt/format.h>
 #include <stdexcept>
 
 // vulkan
@@ -449,6 +448,11 @@ VulkanContext::~VulkanContext() {
 
 bool VulkanContext::supportsCooperativeMatrix2() const {
     return cooperativeMatrix2Supported;
+}
+
+std::string VulkanContext::getDeviceName() const {
+    auto props2 = this->physicalDevice.getProperties2();
+    return props2.properties.deviceName.data();
 }
 
 void VulkanContext::initLogicalDevice() {

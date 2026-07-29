@@ -32,6 +32,7 @@ struct VulkanContext {
     ~VulkanContext();
 
     bool supportsCooperativeMatrix2() const;
+    std::string getDeviceName() const;
 
     DISABLE_COPY(VulkanContext)
     VulkanContext(VulkanContext&&) = delete;
