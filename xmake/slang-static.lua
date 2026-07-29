@@ -11,7 +11,7 @@ package("slang-static", function()
     
     add_links("slang-compiler", "compiler-core", "core", "cmark-gfm", "dl")
 
-    on_install("windows|x64", "macosx", "linux|x86_64", function(package)
+    on_install(function(package)
         import("devel.git")
         import("devel.git.submodule")
         submodule.update({
