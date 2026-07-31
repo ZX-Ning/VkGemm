@@ -10,29 +10,55 @@ includes("xmake/*.lua")
 --     add_requires("libsdl3", {system = false})
 -- end
 
-option("cuBlas", function()
-    set_description("Enable cuBLAS for reference")
-    set_default(true)
-    add_defines("CUBLAS")
+add_requires("vulkan-hpp", "vulkan-memory-allocator", "eigen", "openmp", "fmt", "slang-static v2026.14")
+
+target("core", function()
+    set_kind("object")
+    set_languages("c17", "c++23")
+    add_files("src/**.cpp|test/**")
+    add_packages("vulkan-hpp", "vulkan-memory-allocator", "eigen", "openmp",
+                 "fmt", "slang-static", {public = true})
+
+    add_defines("VK_NO_PROTOTYPES", {public = true})
+    add_defines("VULKAN_HPP_NO_CONSTRUCTORS", {public = true})
+    add_defines("VULKAN_HPP_DISPATCH_LOADER_DYNAMIC=1", {public = true})
+    add_defines("VMA_STATIC_VULKAN_FUNCTIONS=0",
+                "VMA_DYNAMIC_VULKAN_FUNCTIONS=1", {public = true})
+end)
+
+target("cublas_ref", function () 
+    set_kind("object")
+    set_languages("c17", "c++23")
+    add_packages("eigen", "fmt")
+    add_files("src/cuda_ref/*.cpp")
     add_includedirs("/usr/local/cuda/include")
     add_linkdirs("/usr/local/cuda/lib64")
+    add_defines("CUBLAS")
     add_links("cublas", "cudart")
 end)
 
-add_requires("vulkan-hpp", "vulkan-memory-allocator", "eigen", "openmp", "fmt", "slang-static v2026.14")
+option("cuBLAS", function()
+    set_description("Enable cuBLAS for reference")
+    set_default(true)
+    add_defines("CUBLAS")
+end)
 
-target("learn_vulkan", function()
+target("test_gemm", function () 
+    add_options("cuBLAS")
     set_kind("binary")
     set_languages("c17", "c++23")
-    add_files("src/**.cpp")
-    add_files("src/cuda_ref/*.cpp")
-    add_packages("vulkan-hpp", "vulkan-memory-allocator", "eigen", "openmp",
-                 "fmt", "slang-static")
-    add_options("cuBlas")
+    add_deps("core")
+    add_files("src/test/gemm.cpp")
+    on_config(function (target) 
+        if is_config("cuBLAS", true) then
+            target:add("deps", "cublas_ref")
+        end
+    end)
+end)
 
-    add_defines("VK_NO_PROTOTYPES")
-    add_defines("VULKAN_HPP_NO_CONSTRUCTORS")
-    add_defines("VULKAN_HPP_DISPATCH_LOADER_DYNAMIC=1")
-    add_defines("VMA_STATIC_VULKAN_FUNCTIONS=0",
-                "VMA_DYNAMIC_VULKAN_FUNCTIONS=1")
+target("test_gemv", function () 
+    set_kind("binary")
+    set_languages("c17", "c++23")
+    add_deps("core")
+    add_files("src/test/gemv.cpp")
 end)

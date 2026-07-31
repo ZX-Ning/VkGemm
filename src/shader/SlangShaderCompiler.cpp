@@ -120,7 +120,17 @@ struct SlangShaderCompiler::Impl {
             },
             slang::CompilerOptionEntry{
                 .name = slang::CompilerOptionName::Capability,
-                .value = {.kind = slang::CompilerOptionValueKind::String, .stringValue0 = "spvTensorAddressingNV"},
+                .value = {
+                    .kind = slang::CompilerOptionValueKind::String,
+                    .stringValue0 = "spvTensorAddressingNV",
+                },
+            },
+            slang::CompilerOptionEntry{
+                .name = slang::CompilerOptionName::Capability,
+                .value = {
+                    .kind = slang::CompilerOptionValueKind::String,
+                    .stringValue0 = "spvGroupNonUniformArithmetic",
+                },
             },
         };
         slang::TargetDesc targetDesc = {

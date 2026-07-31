@@ -4,62 +4,22 @@
 #include <algorithm>
 #include <filesystem>
 #include <random>
+#include <thread>
 
-#include "core/Buffer.hpp"
-#include "core/RenderPipeline.hpp"
-#include "core/VulkanContext.hpp"
-#include "shader/SlangShaderCompiler.hpp"
-#include "utils.hpp"
+#include "../core/Buffer.hpp"
+#include "../core/RenderPipeline.hpp"
+#include "../core/VulkanContext.hpp"
+#include "../shader/SlangShaderCompiler.hpp"
+#include "../utils.hpp"
 //
 #include <Eigen/Dense>
 
+#include "./common.hpp"
 #ifdef CUBLAS
-#include "cuda_ref/cublas.hpp"
+#include "../cuda_ref/cublas.hpp"
 #endif
 
 constexpr uint32_t MAX_GROUP_ROWS_PER_SUBMISSION = 64;
-
-std::vector<vk::DescriptorSetLayoutBinding> createComputeBindingLayouts(int n) {
-    std::vector<vk::DescriptorSetLayoutBinding> result;
-    for (int i = 0; i < n; i++) {
-        result.push_back(vk::DescriptorSetLayoutBinding{
-            .binding = static_cast<unsigned>(i),
-            .descriptorType = vk::DescriptorType::eStorageBuffer,
-            .descriptorCount = 1,
-            .stageFlags = vk::ShaderStageFlagBits::eCompute,
-        });
-    }
-    return result;
-}
-
-void WriteDescriptorSet(
-    std::vector<const StaticBuffer*> bufs,
-    const vk::DescriptorSet& set,
-    const vk::raii::Device& device
-) {
-    std::vector<vk::DescriptorBufferInfo> infos;
-    std::vector<vk::WriteDescriptorSet> writes;
-    for (size_t i = 0; i < bufs.size(); i++) {
-        infos.push_back({
-            .buffer = bufs[i]->getVkBuffer(),
-            .offset = 0UL,
-            .range = bufs[i]->size(),
-        });
-    }
-    for (size_t i = 0; i < bufs.size(); i++) {
-        writes.push_back(
-            vk::WriteDescriptorSet{
-                .dstSet = set,
-                .dstBinding = static_cast<uint32_t>(i),
-                .dstArrayElement = 0,
-                .descriptorCount = 1,
-                .descriptorType = vk::DescriptorType::eStorageBuffer,
-            }
-                .setBufferInfo({infos[i]})
-        );
-    }
-    device.updateDescriptorSets(writes, {});
-}
 
 // bool varify(const Eigen::MatrixXf& a, const Eigen::MatrixXf& b, const Eigen::MatrixXf& result) {
 //     constexpr int ROUNDS = 200;
@@ -319,6 +279,8 @@ constexpr TestOption TESTS[] = {
 };
 
 int main(int argc, char** argv) {
+    fmt::println("RUNNING GEMM TEST");
+    
     constexpr int COOLDOWN_TIME = 5000;
     size_t matSize = 1 << 14;
     if (argc == 2) {
@@ -335,7 +297,7 @@ int main(int argc, char** argv) {
     size_t refTime = runCuBlas(matSize, mat1, mat2, resultRef);
     results.push_back({"cuBLAS (reference)", refTime});
 #else
-    runCpu(mat1, mat2, mat3_ref);
+    runCpu(mat1, mat2, resultRef);
 #endif
     if (ctx.subgroupSize != 32) {
         fmt::println(stderr, "Subgroup size is {} not 32 ! Abort.", ctx.subgroupSize);
