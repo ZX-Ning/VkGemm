@@ -54,7 +54,7 @@ RUN chmod 700 /root/.ssh && chmod 600 /root/.ssh/authorized_keys && chmod 644 /r
 
 WORKDIR /root/workspace
 
-COPY --from=build /root/workspace/vkgemm/build/linux/x86_64/release/learn_vulkan ./vkgemm
+COPY --from=build /root/workspace/vkgemm/build/linux/x86_64/release/* ./
 COPY ./shaders ./shaders
 
 ENV NVIDIA_DRIVER_CAPABILITIES=compute,utility
