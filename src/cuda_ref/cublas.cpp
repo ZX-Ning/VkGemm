@@ -1,6 +1,6 @@
-#ifdef CUBLAS
+#ifdef CUDA_REF
 
-#include "cublas.hpp"
+#include "cuda_ref.hpp"
 
 #include <cublas_v2.h>
 #include <cuda_runtime.h>
@@ -8,8 +8,6 @@
 #include <cstdlib>
 #include <iostream>
 #include <fmt/format.h>
-
-#include "../utils.hpp"
 
 #define CUDA_CHECK(expr)                                                \
     do {                                                                \
@@ -70,16 +68,18 @@ size_t runCuBlas(
         cudaMemcpyHostToDevice
     ));
 
-    
     cublasHandle_t handle = nullptr;
     CUBLAS_CHECK(cublasCreate(&handle));
-    
-    CUDA_CHECK(cudaDeviceSynchronize());
-    
+
+    cudaEvent_t start = nullptr;
+    cudaEvent_t stop = nullptr;
+    CUDA_CHECK(cudaEventCreate(&start));
+    CUDA_CHECK(cudaEventCreate(&stop));
+
     const float alpha = 1.0f;
     const float beta = 1.0f;
-    
-    size_t time1 = getTimestampMs();
+
+    CUDA_CHECK(cudaEventRecord(start));
     CUBLAS_CHECK(cublasGemmEx(
         handle,
 
@@ -109,10 +109,21 @@ size_t runCuBlas(
         CUBLAS_COMPUTE_32F,
         CUBLAS_GEMM_DEFAULT
     ));
+    CUDA_CHECK(cudaEventRecord(stop));
+    CUDA_CHECK(cudaEventSynchronize(stop));
 
-    CUDA_CHECK(cudaDeviceSynchronize());
-    size_t timeUsed = getTimestampMs() - time1;
-    fmt::println("cuBlas Compute Done. Time: {} ms", timeUsed);
+    float elapsedMilliseconds = 0.0f;
+    CUDA_CHECK(cudaEventElapsedTime(
+        &elapsedMilliseconds,
+        start,
+        stop
+    ));
+    const size_t timeUsed =
+        static_cast<size_t>(elapsedMilliseconds + 0.5f);
+    fmt::println(
+        "cuBlas Compute Done. Time: {:.3f} ms",
+        elapsedMilliseconds
+    );
 
     CUDA_CHECK(cudaMemcpy(
         mat3.data(),
@@ -123,6 +134,8 @@ size_t runCuBlas(
 
     CUBLAS_CHECK(cublasDestroy(handle));
 
+    CUDA_CHECK(cudaEventDestroy(start));
+    CUDA_CHECK(cudaEventDestroy(stop));
     CUDA_CHECK(cudaFree(d_A));
     CUDA_CHECK(cudaFree(d_B));
     CUDA_CHECK(cudaFree(d_C));

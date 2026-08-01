@@ -15,11 +15,11 @@
 #include <Eigen/Dense>
 
 #include "./common.hpp"
-#ifdef CUBLAS
-#include "../cuda_ref/cublas.hpp"
+#ifdef CUDA_REF
+#include "../cuda_ref/cuda_ref.hpp"
 #endif
 
-constexpr uint32_t MAX_GROUP_ROWS_PER_SUBMISSION = 64;
+constexpr uint32_t MAX_GROUP_ROWS_PER_SUBMISSION = 256;
 
 // bool varify(const Eigen::MatrixXf& a, const Eigen::MatrixXf& b, const Eigen::MatrixXf& result) {
 //     constexpr int ROUNDS = 200;
@@ -262,8 +262,8 @@ constexpr TestOption TESTS[] = {
      128,
      {32, 2, 2},
      128},
-    {"shaders/gemm/plain.slang", 32, {32, 32, 1}, 1},
-    {"shaders/gemm/coopmat_plain.slang", 16, {32, 1, 1}, 16},
+    // {"shaders/gemm/plain.slang", 32, {32, 32, 1}, 1},
+    // {"shaders/gemm/coopmat_plain.slang", 16, {32, 1, 1}, 16},
     {"shaders/gemm/coopmat_plain_4acc.slang",
      32,
      {32, 1, 1},
@@ -280,7 +280,7 @@ constexpr TestOption TESTS[] = {
 
 int main(int argc, char** argv) {
     fmt::println("RUNNING GEMM TEST");
-    
+
     constexpr int COOLDOWN_TIME = 5000;
     size_t matSize = 1 << 14;
     if (argc == 2) {
@@ -292,10 +292,46 @@ int main(int argc, char** argv) {
     Eigen::MatrixXf originMat3(mat3);
     Eigen::MatrixXf resultRef(mat3);
     std::vector<std::tuple<std::string, int>> results;
+
+    #ifdef CUDA_REF
+    fmt::println("Warming up", COOLDOWN_TIME);
+    runCuBlas(matSize, mat1, mat2, resultRef);  // warmup
+    std::this_thread::sleep_for(std::chrono::milliseconds(COOLDOWN_TIME));
+    
     fmt::println("{:-^60}", "");
-#ifdef CUBLAS
-    size_t refTime = runCuBlas(matSize, mat1, mat2, resultRef);
+    size_t refTime = runCuBlas(matSize, mat1, mat2, mat3);
     results.push_back({"cuBLAS (reference)", refTime});
+    fmt::println("Cooldown {} ms...", COOLDOWN_TIME);
+    std::this_thread::sleep_for(std::chrono::milliseconds(COOLDOWN_TIME));
+
+    fmt::println("{:-^60}", "");
+    mat3 = originMat3;
+    size_t cudaExp2Time =
+        runCudaExperiment2(matSize, mat1, mat2, mat3);
+    if (!testResult(mat3, resultRef)) {
+        fmt::println(stderr, "CUDA Experiment2 result does not match cuBLAS!");
+        exit(1);
+    }
+    results.push_back({"experiment2_wmma.cu", cudaExp2Time});
+
+    fmt::println("Cooldown {} ms...", COOLDOWN_TIME);
+    std::this_thread::sleep_for(std::chrono::milliseconds(COOLDOWN_TIME));
+    fmt::println("{:-^60}", "");
+    mat3 = originMat3;
+    size_t cuda128x128Time =
+        runCuda128x12816Acc(matSize, mat1, mat2, mat3);
+    if (!testResult(mat3, resultRef)) {
+        fmt::println(
+            stderr,
+            "CUDA 128x128 16ACC result does not match cuBLAS!"
+        );
+        exit(1);
+    }
+    results.push_back({
+        "128x128_16acc_wmma.cu",
+        cuda128x128Time
+    });
+
 #else
     runCpu(mat1, mat2, resultRef);
 #endif
@@ -372,7 +408,7 @@ int main(int argc, char** argv) {
         [](const auto& r1, const auto& r2) { return std::get<1>(r1) < std::get<1>(r2); }
     );
     for (auto& [spvPath, time] : results) {
-#ifdef CUBLAS
+#ifdef CUDA_REF
         out.print("{:<50} {:>15} ms ({:.2f}%)\n", spvPath + ":", time, 100.0 * refTime / time);
 #else
         out.print("{:<50}: {:>15} ms\n", spvPath, time);
