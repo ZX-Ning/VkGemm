@@ -13,6 +13,7 @@
 #include "../utils.hpp"
 //
 #include <Eigen/Dense>
+#include <argparse/argparse.hpp>
 
 #include "./common.hpp"
 #ifdef CUDA_REF
@@ -188,48 +189,48 @@ size_t run(
     const uint32_t groupCount = (matSize + tileSize - 1) / tileSize;
     const auto time1 = getTimestampMs();
 
-    for (uint32_t baseGroupY = 0; baseGroupY < groupCount;
-         baseGroupY += MAX_GROUP_ROWS_PER_SUBMISSION) {
-        const uint32_t groupRows = std::min(
-            MAX_GROUP_ROWS_PER_SUBMISSION,
-            groupCount - baseGroupY
-        );
+    // for (uint32_t baseGroupY = 0; baseGroupY < groupCount;
+    //      baseGroupY += MAX_GROUP_ROWS_PER_SUBMISSION) {
+    // const uint32_t groupRows = std::min(
+    //     MAX_GROUP_ROWS_PER_SUBMISSION,
+    //     groupCount - baseGroupY
+    // );
 
-        cmd.begin({});
-        cmd.bindPipeline(vk::PipelineBindPoint::eCompute, pipeline->pipeline);
-        cmd.pushConstants(
-            layout,
-            vk::ShaderStageFlagBits::eCompute,
-            0,
-            vk::ArrayProxy<const uint32_t>{matSize, matSize, matSize}
-        );
-        cmd.bindDescriptorSets(
-            vk::PipelineBindPoint::eCompute,
-            layout,
-            0,
-            std::array{*sets[0]},
-            nullptr
-        );
-        cmd.dispatchBase(
-            0,
-            baseGroupY,
-            0,
-            groupCount,
-            groupRows,
-            1
-        );
-        // cmd.dispatch(groupCount, groupCount, 1);
-        cmd.end();
+    cmd.begin({});
+    cmd.bindPipeline(vk::PipelineBindPoint::eCompute, pipeline->pipeline);
+    cmd.pushConstants(
+        layout,
+        vk::ShaderStageFlagBits::eCompute,
+        0,
+        vk::ArrayProxy<const uint32_t>{matSize, matSize, matSize}
+    );
+    cmd.bindDescriptorSets(
+        vk::PipelineBindPoint::eCompute,
+        layout,
+        0,
+        std::array{*sets[0]},
+        nullptr
+    );
+    // cmd.dispatchBase(
+    //     0,
+    //     baseGroupY,
+    //     0,
+    //     groupCount,
+    //     groupRows,
+    //     1
+    // );
+    cmd.dispatch(groupCount, groupCount, 1);
+    cmd.end();
 
-        const vk::SubmitInfo submitInfo{
-            .waitSemaphoreCount = 0,
-            .commandBufferCount = 1,
-            .pCommandBuffers = &*cmd,
-            .signalSemaphoreCount = 0
-        };
-        ctx.queue.submit(submitInfo, nullptr);
-        ctx.queue.waitIdle();
-    }
+    const vk::SubmitInfo submitInfo{
+        .waitSemaphoreCount = 0,
+        .commandBufferCount = 1,
+        .pCommandBuffers = &*cmd,
+        .signalSemaphoreCount = 0
+    };
+    ctx.queue.submit(submitInfo, nullptr);
+    ctx.queue.waitIdle();
+    // }
     size_t timeUsed = getTimestampMs() - time1;
     fmt::println("Compute Done. Time used: {} ms. Reading back result...", timeUsed);
     matCBuf->readBackSyncDangerous(ctx, (uint8_t*)mat3.data());
@@ -247,42 +248,72 @@ struct TestOption {
 };
 
 constexpr TestOption TESTS[] = {
-    {"shaders/gemm/experiment.slang", 64, {32, 4, 2}, 64},
-    {"shaders/gemm/experiment2.slang", 64, {32, 4, 2}, 64},
-    {"shaders/gemm/coopmat_cm2_64x64.slang",
-     64,
-     {256, 1, 1},
-     64,
-     true},
-    {"shaders/gemm/coopmat_64x64_4acc.slang",
-     64,
-     {32, 2, 2},
-     64},
-    {"shaders/gemm/coopmat_128x128_16acc.slang",
-     128,
-     {32, 2, 2},
-     128},
+    {
+        "shaders/gemm/coopmat_m64n64k64_4acc.slang",
+        64,
+        {32, 2, 2},
+        64,
+    },
+    {
+        "shaders/gemm/coopmat_m64n64k64_2acc.slang",
+        64,
+        {32, 4, 2},
+        64,
+    },
+    {
+        "shaders/gemm/coopmat_cm2_64x64.slang",
+        64,
+        {256, 1, 1},
+        64,
+        true,
+    },
+    {
+        "shaders/gemm/coopmat_m64n64k32_4acc.slang",
+        64,
+        {32, 2, 2},
+        64,
+    },
+    {
+        "shaders/gemm/coopmat_m128n128k32_16acc.slang",
+        128,
+        {32, 2, 2},
+        128,
+    },
     // {"shaders/gemm/plain.slang", 32, {32, 32, 1}, 1},
     // {"shaders/gemm/coopmat_plain.slang", 16, {32, 1, 1}, 16},
-    {"shaders/gemm/coopmat_plain_4acc.slang",
-     32,
-     {32, 1, 1},
-     32},
-    {"shaders/gemm/coopmat_tiled_1acc.slang",
-     64,
-     {32, 4, 4},
-     1},
-    {"shaders/gemm/coopmat_4acc_simpleload.slang",
-     64,
-     {32, 2, 2},
-     1},
 };
 
 int main(int argc, char** argv) {
+    argparse::ArgumentParser program("test_gemm");
+
+    program.add_argument("size")
+        .help("Size of the matrix (M=N=K=size)")
+        .default_value(1U << 14)
+        .scan<'u', uint32_t>();
+
+    program.add_argument("--kernel")
+        .help("Which kernel to run");
+
+    program.add_argument("--cooldown")
+        .default_value(5000)
+        .scan<'d', int>()
+        .help("Cooldown time between test");
+
+    try {
+        program.parse_args(argc, argv);
+    }
+    catch (const std::exception& err) {
+        std::cerr << err.what() << std::endl;
+        std::cerr << program;
+        return 1;
+    }
+    uint32_t matSize = program.get<uint32_t>("size");
+    std::optional<std::string> kernelName = program.present("--kernel");
+
     fmt::println("RUNNING GEMM TEST");
 
-    constexpr int COOLDOWN_TIME = 5000;
-    size_t matSize = 1 << 14;
+    int cooldownTime = program.get<int>("--cooldown");
+
     if (argc == 2) {
         matSize = std::stoi(argv[1]);
     }
@@ -293,45 +324,38 @@ int main(int argc, char** argv) {
     Eigen::MatrixXf resultRef(mat3);
     std::vector<std::tuple<std::string, int>> results;
 
-    #ifdef CUDA_REF
-    fmt::println("Warming up", COOLDOWN_TIME);
-    runCuBlas(matSize, mat1, mat2, resultRef);  // warmup
-    std::this_thread::sleep_for(std::chrono::milliseconds(COOLDOWN_TIME));
-    
-    fmt::println("{:-^60}", "");
-    size_t refTime = runCuBlas(matSize, mat1, mat2, mat3);
-    results.push_back({"cuBLAS (reference)", refTime});
-    fmt::println("Cooldown {} ms...", COOLDOWN_TIME);
-    std::this_thread::sleep_for(std::chrono::milliseconds(COOLDOWN_TIME));
+#ifdef CUDA_REF
+    size_t refTime = runCuBlas(matSize, mat1, mat2, resultRef);  // warmup
+    results.emplace_back("cuBLAS (ref)", refTime);
 
-    fmt::println("{:-^60}", "");
-    mat3 = originMat3;
-    size_t cudaExp2Time =
-        runCudaExperiment2(matSize, mat1, mat2, mat3);
-    if (!testResult(mat3, resultRef)) {
-        fmt::println(stderr, "CUDA Experiment2 result does not match cuBLAS!");
-        exit(1);
+    if (kernelName.has_value() && *kernelName == "cuda") {
+        fmt::println("Cooldown {} ms...", cooldownTime);
+        std::this_thread::sleep_for(std::chrono::milliseconds(cooldownTime));
+        fmt::println("{:-^60}", "");
+        mat3 = originMat3;
+        size_t cudaExp2Time =
+            runCudaExperiment2(matSize, mat1, mat2, mat3);
+        if (!testResult(mat3, resultRef)) {
+            fmt::println(stderr, "CUDA Experiment2 result does not match cuBLAS!");
+            exit(1);
+        }
+        results.push_back({"experiment2_wmma.cu", cudaExp2Time});
+
+        fmt::println("Cooldown {} ms...", cooldownTime);
+        std::this_thread::sleep_for(std::chrono::milliseconds(cooldownTime));
+        fmt::println("{:-^60}", "");
+        mat3 = originMat3;
+        size_t cuda128x128Time =
+            runCuda128x12816Acc(matSize, mat1, mat2, mat3);
+        if (!testResult(mat3, resultRef)) {
+            fmt::println(
+                stderr,
+                "CUDA 128x128 16ACC result does not match cuBLAS!"
+            );
+            exit(1);
+        }
+        results.push_back({"128x128_16acc_wmma.cu", cuda128x128Time});
     }
-    results.push_back({"experiment2_wmma.cu", cudaExp2Time});
-
-    fmt::println("Cooldown {} ms...", COOLDOWN_TIME);
-    std::this_thread::sleep_for(std::chrono::milliseconds(COOLDOWN_TIME));
-    fmt::println("{:-^60}", "");
-    mat3 = originMat3;
-    size_t cuda128x128Time =
-        runCuda128x12816Acc(matSize, mat1, mat2, mat3);
-    if (!testResult(mat3, resultRef)) {
-        fmt::println(
-            stderr,
-            "CUDA 128x128 16ACC result does not match cuBLAS!"
-        );
-        exit(1);
-    }
-    results.push_back({
-        "128x128_16acc_wmma.cu",
-        cuda128x128Time
-    });
-
 #else
     runCpu(mat1, mat2, resultRef);
 #endif
@@ -341,6 +365,9 @@ int main(int argc, char** argv) {
     }
 
     for (const auto& test : TESTS) {
+        if (kernelName.has_value() && *kernelName != test.shaderPath) {
+            continue;
+        }
         if (matSize % test.matSizeMultiple != 0) {
             fmt::println(
                 "Skipping kernel: {} (matrix size {} is not a multiple of {})",
@@ -360,8 +387,8 @@ int main(int argc, char** argv) {
             continue;
         }
 
-        fmt::println("Cooldown {} ms...", COOLDOWN_TIME);
-        std::this_thread::sleep_for(std::chrono::milliseconds(COOLDOWN_TIME));
+        fmt::println("Cooldown {} ms...", cooldownTime);
+        std::this_thread::sleep_for(std::chrono::milliseconds(cooldownTime));
         fmt::println("{:-^60}", "");
         fmt::println("Compiling kernel: {}", test.shaderPath);
         const auto shaderSource = readFile(test.shaderPath);

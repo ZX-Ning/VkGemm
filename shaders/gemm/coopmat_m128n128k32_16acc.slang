@@ -2,7 +2,7 @@
  * Cooperative-matrix GEMM based on llama.cpp's large CM1 tile.
  *
  * Requirements:
- *   - M and N are multiples of 128; K is a multiple of 64.
+ *   - M and N are multiples of 128; K is a multiple of 32.
  *   - subgroup size is 32.
  *   - numthreads is (32, 2, 2): 4 subgroups, 128 threads.
  *

@@ -1,4 +1,4 @@
-FROM nvidia/cuda:13.3.0-devel-ubuntu26.04 AS build
+FROM nvidia/cuda:12.9.1-devel-ubuntu24.04 AS build
 
 RUN apt-get update \
     && apt-get install -y \
@@ -36,11 +36,13 @@ COPY . .
 
 ENV XMAKE_ROOT=y
 
-RUN ~/.local/bin/xmake f -m release -y
+RUN apt-get install -y clang unzip
+
+RUN ~/.local/bin/xmake f --cuda=/usr/local/cuda --toolchain=clang --cu=clang++ --culd=clang++ -m release -y
 
 RUN ~/.local/bin/xmake -v
 
-FROM nvidia/cuda:13.3.0-runtime-ubuntu26.04
+FROM nvidia/cuda:12.9.1-runtime-ubuntu24.04
 
 RUN apt-get update \
     && apt-get install -y \

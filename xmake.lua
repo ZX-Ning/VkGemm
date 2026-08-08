@@ -15,6 +15,7 @@ add_requires(
     "eigen",
     "openmp",
     "fmt",
+    "argparse",
     "slang-static v2026.14"
 )
 
@@ -66,6 +67,7 @@ target("test_gemm", function()
     set_kind("binary")
     set_languages("c17", "c++23")
     add_deps("core")
+    add_packages("argparse")
     add_files("src/test/gemm.cpp")
     if is_config("CUDA_REF", true) then
         add_deps("cuda_ref")
