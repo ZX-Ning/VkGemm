@@ -249,9 +249,21 @@ struct TestOption {
 
 constexpr TestOption TESTS[] = {
     {
+        "shaders/gemm/coopmat_m128n128k32_4acc.slang",
+        128,
+        {32, 4, 4},
+        128,
+    },
+    {
         "shaders/gemm/coopmat_m64n64k64_4acc.slang",
         64,
         {32, 2, 2},
+        64,
+    },
+    {
+        "shaders/gemm/coopmat_m64n64k32_2acc.slang",
+        64,
+        {32, 4, 2},
         64,
     },
     {
@@ -299,6 +311,8 @@ int main(int argc, char** argv) {
         .scan<'d', int>()
         .help("Cooldown time between test");
 
+    program.add_argument("--no-verify").flag();
+
     try {
         program.parse_args(argc, argv);
     }
@@ -309,6 +323,7 @@ int main(int argc, char** argv) {
     }
     uint32_t matSize = program.get<uint32_t>("size");
     std::optional<std::string> kernelName = program.present("--kernel");
+    bool noVerify = program.get<bool>("--no-verify");
 
     fmt::println("RUNNING GEMM TEST");
 
@@ -324,9 +339,12 @@ int main(int argc, char** argv) {
     Eigen::MatrixXf resultRef(mat3);
     std::vector<std::tuple<std::string, int>> results;
 
+    size_t refTime = 0;
 #ifdef CUDA_REF
-    size_t refTime = runCuBlas(matSize, mat1, mat2, resultRef);  // warmup
-    results.emplace_back("cuBLAS (ref)", refTime);
+    if (!noVerify) {
+        refTime = runCuBlas(matSize, mat1, mat2, resultRef);
+        results.emplace_back("cuBLAS (ref)", refTime);
+    }
 
     if (kernelName.has_value() && *kernelName == "cuda") {
         fmt::println("Cooldown {} ms...", cooldownTime);
@@ -335,7 +353,7 @@ int main(int argc, char** argv) {
         mat3 = originMat3;
         size_t cudaExp2Time =
             runCudaExperiment2(matSize, mat1, mat2, mat3);
-        if (!testResult(mat3, resultRef)) {
+        if (!noVerify && !testResult(mat3, resultRef)) {
             fmt::println(stderr, "CUDA Experiment2 result does not match cuBLAS!");
             exit(1);
         }
@@ -347,7 +365,7 @@ int main(int argc, char** argv) {
         mat3 = originMat3;
         size_t cuda128x128Time =
             runCuda128x12816Acc(matSize, mat1, mat2, mat3);
-        if (!testResult(mat3, resultRef)) {
+        if (!noVerify && !testResult(mat3, resultRef)) {
             fmt::println(
                 stderr,
                 "CUDA 128x128 16ACC result does not match cuBLAS!"
@@ -357,7 +375,9 @@ int main(int argc, char** argv) {
         results.push_back({"128x128_16acc_wmma.cu", cuda128x128Time});
     }
 #else
-    runCpu(mat1, mat2, resultRef);
+    if (!noVerify) {
+        runCpu(mat1, mat2, resultRef);
+    }
 #endif
     if (ctx.subgroupSize != 32) {
         fmt::println(stderr, "Subgroup size is {} not 32 ! Abort.", ctx.subgroupSize);
@@ -413,7 +433,7 @@ int main(int argc, char** argv) {
             mat3,
             test.numthreads
         );
-        if (!testResult(mat3, resultRef)) {
+        if (!noVerify && !testResult(mat3, resultRef)) {
             fmt::println(stderr, "not match!!!");
             exit(1);
         }
